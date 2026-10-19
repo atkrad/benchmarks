@@ -1,0 +1,20 @@
+# Local tool output
+result
+result-*
+.direnv/
+
+# Go build products
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Benchmark working directories, logs, profiles, and uncurated results.
+# Reviewed datasets and .gitkeep files stay tracked.
+local-results/
+local-smoke/
+*.log
+*.prof
+*.pprof
+*.prof.gz
