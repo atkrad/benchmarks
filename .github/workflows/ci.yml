@@ -1,6 +1,7 @@
 # Builds, tests, and static checks only. This workflow does not run the
 # memory experiment, a smoke run, go test -bench, or benchstat on real data.
 # Go 1.28-dev is compiled from the pinned source during nix flake check.
+# nix run .#fmt is not used here: it edits files. fmt-check only reports drift.
 name: ci
 
 on:
@@ -24,34 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
-      - name: Require cgo for the race detector
-        run: |
-          test "$(nix develop -c go env CGO_ENABLED)" = "1"
-          test -n "$(nix develop -c go env CC)"
+      - name: Format check
+        run: nix run .#fmt-check
+      - name: Lint
+        run: nix run .#lint
+      - name: Vet
+        run: nix run .#vet
       - name: Unit tests
-        run: |
-          set -o pipefail
-          nix develop -c go test -json ./... | tee unit.json
-          skips=$(jq -r 'select(.Action=="skip") | "\(.Package) \(.Test)"' unit.json)
-          if [ -n "$skips" ]; then
-            echo "unexpected skipped tests:"
-            printf '%s\n' "$skips"
-            exit 1
-          fi
+        run: nix run .#test
       - name: Integration tests
-        run: |
-          set -o pipefail
-          nix develop -c go test -json -tags integration ./... | tee integration.json
-          skips=$(jq -r 'select(.Action=="skip") | "\(.Package) \(.Test)"' integration.json)
-          if [ -n "$skips" ]; then
-            echo "unexpected skipped tests:"
-            printf '%s\n' "$skips"
-            exit 1
-          fi
+        run: nix run .#test-integration
       - name: Race detector
-        run: nix develop -c go test -race -count=1 -tags integration ./...
-      - name: Vet and formatting
-        run: |
-          nix develop -c go vet ./...
-          nix develop -c go vet -tags integration ./...
-          test -z "$(nix develop -c gofmt -l .)"
+        run: nix run .#test-race

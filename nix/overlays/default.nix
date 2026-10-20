@@ -7,5 +7,6 @@ final: prev: {
     go_1_27_2 = final.callPackage ../packages/go-1.27.2.nix { };
     go_1_28_dev = final.callPackage ../packages/go-1.28-dev.nix { };
     benchstat = final.callPackage ../packages/benchstat.nix { };
+    golangci-lint = final.callPackage ../packages/golangci-lint.nix { };
   };
 }

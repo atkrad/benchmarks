@@ -104,13 +104,35 @@ func TestServerAndClientHoldIdleHTTP2(t *testing.T) {
 	}
 }
 
+func TestServeReturnsWhenListenerStopsEarly(t *testing.T) {
+	srv, err := New(Options{Now: time.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+	if err := srv.httpsLn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected the early listener stop to be reported")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve blocked after a listener stopped")
+	}
+}
+
 func mustStats(t *testing.T, addr string) protocol.Stats {
 	t.Helper()
 	resp, err := http.Get("http://" + addr + "/stats")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var stats protocol.Stats
 	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
 		t.Fatal(err)

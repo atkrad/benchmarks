@@ -19,6 +19,7 @@ type Config struct {
 	Rounds           int     `json:"rounds"`
 	DialConcurrency  int     `json:"dial_concurrency"`
 	MaxTrialRetries  int     `json:"max_trial_retries"`
+	DialRetries      int     `json:"dial_retries"`
 	Seed             uint64  `json:"seed"`
 	GOMAXPROCS       int     `json:"gomaxprocs"`
 	GOGC             int     `json:"gogc"`
@@ -78,6 +79,7 @@ func Parse(args []string, defaultsPath string) (Config, error) {
 	out := fs.String("out", "", "directory for this run's parent output")
 	dial := fs.Int("dial-concurrency", cfg.DialConcurrency, "parallel connection dials")
 	retries := fs.Int("max-trial-retries", cfg.MaxTrialRetries, "extra attempts after a failed trial")
+	dialRetries := fs.Int("dial-retries", cfg.DialRetries, "dial attempts per connection, separate from trial retries")
 	seed := fs.Uint64("seed", cfg.Seed, "plan shuffle seed")
 	gomaxprocs := fs.Int("gomaxprocs", cfg.GOMAXPROCS, "GOMAXPROCS for the server")
 	gogc := fs.Int("gogc", cfg.GOGC, "GOGC for the server")
@@ -122,6 +124,8 @@ func Parse(args []string, defaultsPath string) (Config, error) {
 			cfg.DialConcurrency = *dial
 		case "max-trial-retries":
 			cfg.MaxTrialRetries = *retries
+		case "dial-retries":
+			cfg.DialRetries = *dialRetries
 		case "seed":
 			cfg.Seed = *seed
 		case "gomaxprocs":
@@ -203,10 +207,13 @@ func (c Config) Validate() error {
 	if c.MaxTrialRetries < 0 {
 		return fmt.Errorf("config: retries %d", c.MaxTrialRetries)
 	}
+	if c.DialRetries < 0 {
+		return fmt.Errorf("config: dial retries %d", c.DialRetries)
+	}
 	if c.GOMAXPROCS < 1 || c.GOGC < 1 {
 		return errors.New("config: GOMAXPROCS and GOGC must be >= 1")
 	}
-	if c.StabilityPolls < 1 || c.PollIntervalMS < 1 || c.StabilityTimeout < 1 {
+	if c.StabilityPolls < 2 || c.PollIntervalMS < 1 || c.StabilityTimeout < 1 {
 		return errors.New("config: stability settings must be positive")
 	}
 	if c.SampleCount < 1 || c.SampleIntervalMS < 1 {

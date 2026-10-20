@@ -26,13 +26,14 @@ func TestStabilizeSteadyWindow(t *testing.T) {
 	var n int
 	out, err := Stabilize(t.Context(), func(context.Context) (Observation, error) {
 		n++
-		return Observation{Connections: 2, Goroutines: 10, RSSBytes: 1000 + uint64(n%2)}, nil
+		return Observation{ActiveUnits: 2, Goroutines: 10, RSSBytes: 1000 + uint64(n%2)}, nil
 	}, Criteria{
-		MinPolls:     5,
-		Interval:     time.Second,
-		Timeout:      20 * time.Second,
-		DriftPercent: 1,
-		DriftBytes:   10,
+		ExpectedActiveUnits: 2,
+		MinPolls:            5,
+		Interval:            time.Second,
+		Timeout:             20 * time.Second,
+		DriftPercent:        1,
+		DriftBytes:          10,
 	}, clock.Now, clock.Sleep)
 	if err != nil {
 		t.Fatal(err)
@@ -50,18 +51,18 @@ func TestStabilizeSteadyWindow(t *testing.T) {
 func TestStabilizeResetsOnConnectionChange(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(0, 0)}
 	seq := []Observation{
-		{Connections: 1, Goroutines: 4, RSSBytes: 100},
-		{Connections: 1, Goroutines: 4, RSSBytes: 100},
-		{Connections: 2, Goroutines: 4, RSSBytes: 100},
-		{Connections: 2, Goroutines: 4, RSSBytes: 100},
-		{Connections: 2, Goroutines: 4, RSSBytes: 100},
+		{ActiveUnits: 1, Goroutines: 4, RSSBytes: 100},
+		{ActiveUnits: 1, Goroutines: 4, RSSBytes: 100},
+		{ActiveUnits: 2, Goroutines: 4, RSSBytes: 100},
+		{ActiveUnits: 2, Goroutines: 4, RSSBytes: 100},
+		{ActiveUnits: 2, Goroutines: 4, RSSBytes: 100},
 	}
 	var i int
 	out, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
 		obs := seq[i]
 		i++
 		return obs, nil
-	}, Criteria{MinPolls: 3, Interval: time.Millisecond, Timeout: time.Second}, clock.Now, clock.Sleep)
+	}, Criteria{ExpectedActiveUnits: 2, MinPolls: 3, Interval: time.Millisecond, Timeout: time.Second}, clock.Now, clock.Sleep)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +79,8 @@ func TestStabilizeGoroutineGlitch(t *testing.T) {
 	out, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
 		g := goroutines[i]
 		i++
-		return Observation{Connections: 1, Goroutines: g, RSSBytes: 50}, nil
-	}, Criteria{MinPolls: 5, Interval: time.Millisecond, Timeout: time.Minute}, clock.Now, clock.Sleep)
+		return Observation{ActiveUnits: 1, Goroutines: g, RSSBytes: 50}, nil
+	}, Criteria{ExpectedActiveUnits: 1, MinPolls: 5, Interval: time.Millisecond, Timeout: time.Minute}, clock.Now, clock.Sleep)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,13 +96,14 @@ func TestStabilizeRSSDrift(t *testing.T) {
 	out, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
 		value := rss[i]
 		i++
-		return Observation{Connections: 1, Goroutines: 3, RSSBytes: value}, nil
+		return Observation{ActiveUnits: 1, Goroutines: 3, RSSBytes: value}, nil
 	}, Criteria{
-		MinPolls:     5,
-		Interval:     time.Millisecond,
-		Timeout:      time.Minute,
-		DriftPercent: 10,
-		DriftBytes:   10,
+		ExpectedActiveUnits: 1,
+		MinPolls:            5,
+		Interval:            time.Millisecond,
+		Timeout:             time.Minute,
+		DriftPercent:        10,
+		DriftBytes:          10,
 	}, clock.Now, clock.Sleep)
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +116,8 @@ func TestStabilizeRSSDrift(t *testing.T) {
 func TestStabilizeDeadline(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(0, 0)}
 	out, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
-		return Observation{Connections: 1, Goroutines: 1, RSSBytes: 1}, nil
-	}, Criteria{MinPolls: 50, Interval: 10 * time.Millisecond, Timeout: 30 * time.Millisecond}, clock.Now, clock.Sleep)
+		return Observation{ActiveUnits: 1, Goroutines: 1, RSSBytes: 1}, nil
+	}, Criteria{ExpectedActiveUnits: 1, MinPolls: 50, Interval: 10 * time.Millisecond, Timeout: 30 * time.Millisecond}, clock.Now, clock.Sleep)
 	if !errors.Is(err, ErrUnstable) {
 		t.Fatalf("err = %v", err)
 	}
@@ -130,7 +132,7 @@ func TestStabilizeCancel(t *testing.T) {
 	_, err := Stabilize(ctx, func(context.Context) (Observation, error) {
 		t.Fatal("poll ran after cancel")
 		return Observation{}, nil
-	}, Criteria{MinPolls: 1, Interval: time.Millisecond, Timeout: time.Second}, nil, nil)
+	}, Criteria{ExpectedActiveUnits: 1, MinPolls: 2, Interval: time.Millisecond, Timeout: time.Second}, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}
@@ -145,8 +147,8 @@ func TestStabilizeCancelDuringSleep(t *testing.T) {
 		if polls == 1 {
 			cancel()
 		}
-		return Observation{Connections: 1, Goroutines: 1, RSSBytes: 1}, nil
-	}, Criteria{MinPolls: 5, Interval: time.Second, Timeout: time.Minute}, clock.Now, func(ctx context.Context, d time.Duration) error {
+		return Observation{ActiveUnits: 1, Goroutines: 1, RSSBytes: 1}, nil
+	}, Criteria{ExpectedActiveUnits: 1, MinPolls: 5, Interval: time.Second, Timeout: time.Minute}, clock.Now, func(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -154,6 +156,34 @@ func TestStabilizeCancelDuringSleep(t *testing.T) {
 	}
 	if len(out.History) != 1 {
 		t.Fatalf("history = %d", len(out.History))
+	}
+}
+
+func TestStabilizeRejectsOnePoll(t *testing.T) {
+	_, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
+		return Observation{ActiveUnits: 1}, nil
+	}, Criteria{ExpectedActiveUnits: 1, MinPolls: 1, Interval: time.Millisecond, Timeout: time.Second}, time.Now, nil)
+	if err == nil {
+		t.Fatal("expected one poll to be rejected")
+	}
+}
+
+func TestStabilizeIgnoresWrongActiveUnits(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	var n int
+	out, err := Stabilize(context.Background(), func(context.Context) (Observation, error) {
+		n++
+		units := 9
+		if n > 3 {
+			units = 2
+		}
+		return Observation{ActiveUnits: units, Goroutines: 1, RSSBytes: 10}, nil
+	}, Criteria{ExpectedActiveUnits: 2, MinPolls: 2, Interval: time.Millisecond, Timeout: time.Second}, clock.Now, clock.Sleep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.History) != 5 {
+		t.Fatalf("history = %d, want 5", len(out.History))
 	}
 }
 

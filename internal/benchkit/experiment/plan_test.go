@@ -1,8 +1,9 @@
 package experiment
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPlanCoversEveryCellOnce(t *testing.T) {
@@ -25,7 +26,7 @@ func TestPlanCoversEveryCellOnce(t *testing.T) {
 	}
 	for _, cell := range cells {
 		seen[cell]++
-		perRound[cell.Round][Cell{Case: cell.Case, Connections: cell.Connections}]++
+		perRound[cell.Round][Cell{Case: cell.Case, Load: cell.Load}]++
 	}
 	for cell, n := range seen {
 		if n != 1 {
@@ -83,26 +84,24 @@ func TestPlanSeedIsReproducible(t *testing.T) {
 }
 
 func TestPlanRejectsInvalidInput(t *testing.T) {
-	cases := []struct {
+	tests := []struct {
 		name   string
 		cases  []string
-		counts []int
+		loads  []int
 		rounds int
 	}{
-		{name: "no cases", counts: []int{0}, rounds: 1},
-		{name: "no counts", cases: []string{"a"}, rounds: 1},
-		{name: "zero rounds", cases: []string{"a"}, counts: []int{0}},
-		{name: "negative", cases: []string{"a"}, counts: []int{-1}, rounds: 1},
-		{name: "duplicate count", cases: []string{"a"}, counts: []int{1, 1}, rounds: 1},
-		{name: "duplicate case", cases: []string{"a", "a"}, counts: []int{0}, rounds: 1},
-		{name: "empty case", cases: []string{""}, counts: []int{0}, rounds: 1},
+		{name: "no cases", loads: []int{0}, rounds: 1},
+		{name: "no loads", cases: []string{"a"}, rounds: 1},
+		{name: "zero rounds", cases: []string{"a"}, loads: []int{0}},
+		{name: "negative load", cases: []string{"a"}, loads: []int{-1}, rounds: 1},
+		{name: "duplicate load", cases: []string{"a"}, loads: []int{1, 1}, rounds: 1},
+		{name: "duplicate case", cases: []string{"a", "a"}, loads: []int{0}, rounds: 1},
+		{name: "empty case", cases: []string{""}, loads: []int{0}, rounds: 1},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := Plan(tc.cases, tc.counts, tc.rounds, 1)
-			if !errors.Is(err, ErrInvalidPlan) {
-				t.Fatalf("err = %v", err)
-			}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Plan(tt.cases, tt.loads, tt.rounds, 42)
+			require.ErrorIs(t, err, ErrInvalidPlan)
 		})
 	}
 }
@@ -112,7 +111,7 @@ func TestPlanAllowsZeroConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cells) != 1 || cells[0].Connections != 0 {
+	if len(cells) != 1 || cells[0].Load != 0 {
 		t.Fatalf("cells = %+v", cells)
 	}
 }

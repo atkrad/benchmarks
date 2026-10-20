@@ -1,4 +1,5 @@
-package server
+// Package certutil builds ephemeral certificates for local listeners.
+package certutil
 
 import (
 	"crypto/ecdsa"
@@ -14,16 +15,16 @@ import (
 	"time"
 )
 
-// Certificate is an ephemeral self-signed certificate for 127.0.0.1.
-// PEM is the public certificate, so a client can trust this server only.
+// Certificate is an ephemeral self-signed certificate for loopback names.
+// PEM is the public certificate only. The private key stays in TLS.
 type Certificate struct {
 	TLS tls.Certificate
 	PEM []byte
 }
 
-// NewCertificate builds a certificate that expires in a day.
-// It is not a trust anchor outside this process.
-func NewCertificate(now time.Time) (Certificate, error) {
+// NewLoopback returns a certificate for localhost, 127.0.0.1, and ::1.
+// It expires one day after now and is not a trust anchor outside this process.
+func NewLoopback(now time.Time) (Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Certificate{}, fmt.Errorf("generate key: %w", err)

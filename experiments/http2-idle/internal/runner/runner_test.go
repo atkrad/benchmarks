@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -8,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/atkrad/benchmarks/experiments/http2-idle/internal/protocol"
+	"github.com/atkrad/benchmarks/internal/benchkit/experiment"
 	"github.com/atkrad/benchmarks/internal/benchkit/measurement"
 	"github.com/atkrad/benchmarks/internal/benchkit/process"
 )
@@ -237,7 +241,7 @@ func TestRunRechecksHeldConnections(t *testing.T) {
 		if err != nil || spec.Path != cfg.Client {
 			return child, err
 		}
-		return &writingChild{fakeChild: child.(*fakeChild), onWrite: func() { rechecked = true }}, nil
+		return &writingChild{fakeChild: child.(*fakeChild), onWrite: func([]byte) { rechecked = true }}, nil
 	}
 	if err := Run(t.Context(), cfg, deps); err != nil {
 		t.Fatal(err)
@@ -249,12 +253,12 @@ func TestRunRechecksHeldConnections(t *testing.T) {
 
 type writingChild struct {
 	*fakeChild
-	onWrite func()
+	onWrite func([]byte)
 }
 
 func (w *writingChild) Write(p []byte) (int, error) {
 	if w.onWrite != nil {
-		w.onWrite()
+		w.onWrite(p)
 	}
 	return w.fakeChild.Write(p)
 }
@@ -265,6 +269,92 @@ func mustJSON(v any) json.RawMessage {
 		panic(err)
 	}
 	return raw
+}
+
+func TestTrialKeepsStderrFromWait(t *testing.T) {
+	clock := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cfg := testConfig(t)
+	eng := &engine{
+		cfg: cfg,
+		deps: testDeps(&clock, func(context.Context, process.Spec) (Child, error) {
+			return &stderrChild{fakeChild: &fakeChild{pid: 4}, text: "server blew up\n"}, nil
+		}),
+		hashes: map[string]string{},
+	}
+	rec, err := eng.trial(t.Context(), experiment.Cell{Case: "go127", Load: 0}, runCase{Name: "go127", Binary: cfg.ServerGo127}, "run", 0)
+	require.Error(t, err)
+	require.Contains(t, rec.Stderr, "server blew up")
+}
+
+func TestSmokeProfilePrecedesClose(t *testing.T) {
+	clock := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cfg := testConfig(t)
+	cfg.Smoke = true
+	cfg.ConnectionCounts = []int{1}
+	var closed bool
+	var profiled bool
+	var profileAfterClose bool
+	deps := testDeps(&clock, func(_ context.Context, spec process.Spec) (Child, error) {
+		if spec.Path == cfg.Client {
+			return &fakeChild{pid: 7, events: []json.RawMessage{
+				readyEvent(),
+				mustJSON(protocol.RecheckResult{Version: protocol.Version, Event: protocol.EventRecheckResult, OK: true, Reused: 1}),
+				mustJSON(protocol.Closed{Version: protocol.Version, Event: protocol.EventClosed}),
+			}}, nil
+		}
+		return &fakeChild{pid: 9, events: []json.RawMessage{readyEvent()}}, nil
+	})
+	deps.Get = func(context.Context, string) ([]byte, error) {
+		profiled = true
+		if closed {
+			profileAfterClose = true
+		}
+		return []byte("goroutine 1 [running]:\n"), nil
+	}
+	deps.Stats = func(context.Context, string) (protocol.Stats, error) {
+		requests := int64(1)
+		per := []int64{1}
+		if closed {
+			requests = 2
+			per = []int64{2}
+		}
+		return protocol.Stats{
+			WallTime: clock.Format(time.RFC3339Nano), GoVersion: "go1.test",
+			Accepted: 1, Open: 1, H2Requests: requests, ConnRequests: per,
+			Goroutines: 10, HeapAlloc: 100, StackInuse: 50,
+		}, nil
+	}
+	prev := deps.Start
+	deps.Start = func(ctx context.Context, spec process.Spec) (Child, error) {
+		child, err := prev(ctx, spec)
+		if spec.Path != cfg.Client {
+			closed = false
+		}
+		if err != nil || spec.Path != cfg.Client {
+			return child, err
+		}
+		return &writingChild{fakeChild: child.(*fakeChild), onWrite: func(p []byte) {
+			if bytes.Contains(p, []byte(`"event":"recheck"`)) {
+				closed = true
+			}
+		}}, nil
+	}
+	require.NoError(t, Run(t.Context(), cfg, deps))
+	require.True(t, profiled)
+	require.False(t, profileAfterClose)
+}
+
+type stderrChild struct {
+	*fakeChild
+	text string
+}
+
+func (s *stderrChild) ReadEvent(context.Context) (json.RawMessage, error) {
+	return nil, os.ErrClosed
+}
+
+func (s *stderrChild) Wait() (process.Result, error) {
+	return process.Result{ExitCode: 1, Stderr: s.text}, os.ErrClosed
 }
 
 func TestRunCancel(t *testing.T) {

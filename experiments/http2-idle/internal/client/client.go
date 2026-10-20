@@ -241,7 +241,7 @@ func do(ctx context.Context, transport *http.Transport, url string, timeout time
 	if err != nil {
 		return "", false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("status %s", resp.Status)

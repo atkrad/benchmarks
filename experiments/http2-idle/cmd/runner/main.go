@@ -26,9 +26,9 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("http2-idle", flag.ContinueOnError)
 	configPath := fs.String("config", "", "defaults file")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: http2-idle --config defaults.json --out DIR [flags]")
-		fmt.Fprintln(fs.Output(), "The Nix app sets the compiler paths. Run --help after --config is not required;")
-		fmt.Fprintln(fs.Output(), "pass --help as the only argument to see the flags.")
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: http2-idle --config defaults.json --out DIR [flags]")
+		_, _ = fmt.Fprintln(fs.Output(), "The Nix app sets the compiler paths. Run --help after --config is not required;")
+		_, _ = fmt.Fprintln(fs.Output(), "pass --help as the only argument to see the flags.")
 	}
 	// --config is consumed here. Every other flag, including --help, is
 	// parsed against the defaults file so the usage text lists real flags.

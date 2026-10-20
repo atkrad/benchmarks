@@ -3,6 +3,7 @@
   "rounds": 10,
   "dial_concurrency": 32,
   "max_trial_retries": 1,
+  "dial_retries": 2,
   "seed": 1,
   "gomaxprocs": 12,
   "gogc": 100,

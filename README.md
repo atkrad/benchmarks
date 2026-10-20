@@ -23,20 +23,28 @@ direnv is optional. It enters the development shell when you `cd` into the repos
 nix develop
 direnv allow
 nix build .#http2-idle
+nix run .#http2-idle -- --help
 nix run .#http2-idle -- --counts 0,1000,5000 --rounds 10 --out ./local-results
 nix flake check
 ```
 
-`nix develop` gives you Go 1.27.2, benchstat, git, and a C compiler. `go test -race` needs that compiler, so the shell sets `CGO_ENABLED=1`. The shell does not download Go modules for you. The first `go test` fetches them into the module cache.
-
-`nix build` and `nix flake check` are hermetic. They use the vendored module hash and do not run the memory experiment. `nix run` is how you start a real run, on the host, with output in a directory you can write.
+Each check is its own command:
 
 ```sh
-nix develop -c go test ./...
-nix develop -c go test -tags integration ./...
-nix develop -c go test -race -tags integration ./...
-nix develop -c go vet ./...
+nix run .#test
+nix run .#test-integration
+nix run .#test-race
+nix run .#lint
+nix run .#vet
+nix run .#fmt
+nix run .#fmt-check
 ```
+
+`fmt` rewrites Go files with `golangci-lint fmt`. `fmt-check` only prints a diff and fails if one exists. CI runs `fmt-check`, not `fmt`.
+
+`nix develop` gives you Go 1.27.2, golangci-lint built with that compiler, benchstat, git, and a C compiler. `go test -race` needs that compiler, so the shell sets `CGO_ENABLED=1`. The shell does not download Go modules for you. The first `go test` fetches them into the module cache.
+
+`nix build` and `nix flake check` are hermetic. They use the vendored module hash and do not run the memory experiment. `nix run .#http2-idle` is how you start a real run, on the host, with output in a directory you can write.
 
 Integration tests open a few local connections to check behavior. They are not a benchmark. Unit tests do not open sockets, so they can run inside the Nix sandbox.
 

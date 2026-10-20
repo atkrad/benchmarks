@@ -4,10 +4,19 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/perf/benchfmt"
 )
+
+func connectionsName(n int) string {
+	return "HTTP2Idle/connections=" + strconv.Itoa(n)
+}
+
+var invariantKeys = []string{"goos", "goarch", "cpu", "gc-policy", "gomaxprocs", "gogc", "run-id"}
 
 func sampleFiles() []File {
 	base := map[string]string{
@@ -48,7 +57,7 @@ func sampleFiles() []File {
 		for _, connections := range []int{0, 1000} {
 			for trial := range 3 {
 				file.Results = append(file.Results, Result{
-					Name: ConnectionsName(connections),
+					Name: connectionsName(connections),
 					Values: []Value{
 						{Value: item.rss[trial] + float64(connections), Unit: "rss-B"},
 						{Value: item.goro, Unit: "goroutines"},
@@ -63,7 +72,7 @@ func sampleFiles() []File {
 
 func TestBenchfmtRoundTrip(t *testing.T) {
 	files := sampleFiles()
-	if err := EqualInvariants(files, InvariantKeys); err != nil {
+	if err := EqualInvariants(files, invariantKeys); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,7 +130,7 @@ func TestBenchfmtRoundTrip(t *testing.T) {
 func TestEqualInvariantsRejectsDrift(t *testing.T) {
 	files := sampleFiles()
 	files[1].Config["goos"] = "windows"
-	if err := EqualInvariants(files, InvariantKeys); err == nil {
+	if err := EqualInvariants(files, invariantKeys); err == nil {
 		t.Fatal("expected mismatched goos to fail")
 	}
 }
@@ -145,11 +154,7 @@ func TestBenchfmtGolden(t *testing.T) {
 			continue
 		}
 		want, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(want, buf.Bytes()) {
-			t.Fatalf("%s drifted from the writer; set UPDATE_GOLDEN=1 to refresh\n%s", path, buf.String())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, string(want), buf.String(), "%s drifted; set UPDATE_GOLDEN=1 to refresh", path)
 	}
 }

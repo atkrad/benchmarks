@@ -6,22 +6,9 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 
 	"golang.org/x/perf/benchfmt"
 )
-
-// InvariantKeys must be identical in every case file of one comparison.
-// Keys that differ per case are omitted from benchstat grouping with -ignore.
-var InvariantKeys = []string{
-	"goos",
-	"goarch",
-	"cpu",
-	"gc-policy",
-	"gomaxprocs",
-	"gogc",
-	"run-id",
-}
 
 // Value is one measurement on a trial.
 type Value struct {
@@ -131,10 +118,4 @@ func EqualInvariants(files []File, keys []string) error {
 		}
 	}
 	return nil
-}
-
-// ConnectionsName is the benchmark name for one connection count.
-// The benchfmt writer prints it with a Benchmark prefix.
-func ConnectionsName(connections int) string {
-	return "HTTP2Idle/connections=" + strconv.Itoa(connections)
 }

@@ -13,9 +13,11 @@ import (
 var ErrUnstable = errors.New("not stable")
 
 // Observation is one poll. Stabilize overwrites At with its own clock.
+// ActiveUnits is the count the caller is holding steady, such as open
+// connections or in-flight jobs.
 type Observation struct {
 	At          time.Time
-	Connections int
+	ActiveUnits int
 	Goroutines  int
 	RSSBytes    uint64
 }
@@ -23,13 +25,16 @@ type Observation struct {
 // Criteria controls how long a series must stay quiet.
 // RSS is steady when its span is at most the larger of DriftBytes and
 // DriftPercent of the window's minimum RSS. Goroutine counts must be equal
-// across MinPolls consecutive polls. A change in Connections clears the window.
+// across MinPolls consecutive polls, and every poll in that window must
+// report ExpectedActiveUnits. MinPolls is at least 2 because a drift span
+// needs two samples.
 type Criteria struct {
-	MinPolls     int
-	Interval     time.Duration
-	Timeout      time.Duration
-	DriftPercent float64
-	DriftBytes   uint64
+	ExpectedActiveUnits int
+	MinPolls            int
+	Interval            time.Duration
+	Timeout             time.Duration
+	DriftPercent        float64
+	DriftBytes          uint64
 }
 
 // Outcome keeps every poll, including ones that reset the window.
@@ -52,14 +57,17 @@ func Stabilize(
 	if poll == nil {
 		return Outcome{}, errors.New("stabilize: poll is nil")
 	}
-	if criteria.MinPolls < 1 {
-		return Outcome{}, fmt.Errorf("stabilize: min polls must be >= 1")
+	if criteria.MinPolls < 2 {
+		return Outcome{}, fmt.Errorf("stabilize: min polls must be >= 2")
 	}
 	if criteria.Interval <= 0 || criteria.Timeout <= 0 {
 		return Outcome{}, fmt.Errorf("stabilize: interval and timeout must be positive")
 	}
 	if criteria.DriftPercent < 0 {
 		return Outcome{}, fmt.Errorf("stabilize: drift percent must be >= 0")
+	}
+	if criteria.ExpectedActiveUnits < 0 {
+		return Outcome{}, fmt.Errorf("stabilize: expected active units must be >= 0")
 	}
 	if now == nil {
 		now = time.Now
@@ -85,15 +93,16 @@ func Stabilize(
 		obs.At = now()
 		history = append(history, obs)
 
-		if len(window) > 0 && obs.Connections != window[len(window)-1].Connections {
+		if obs.ActiveUnits != criteria.ExpectedActiveUnits {
 			window = nil
-		}
-		window = append(window, obs)
-		if len(window) > criteria.MinPolls {
-			window = window[len(window)-criteria.MinPolls:]
-		}
-		if len(window) == criteria.MinPolls && steady(window, criteria) {
-			return Outcome{Stable: true, History: history}, nil
+		} else {
+			window = append(window, obs)
+			if len(window) > criteria.MinPolls {
+				window = window[len(window)-criteria.MinPolls:]
+			}
+			if len(window) == criteria.MinPolls && steady(window, criteria) {
+				return Outcome{Stable: true, History: history}, nil
+			}
 		}
 		if err := sleep(ctx, criteria.Interval); err != nil {
 			return Outcome{History: history}, err
@@ -102,11 +111,10 @@ func Stabilize(
 }
 
 func steady(window []Observation, criteria Criteria) bool {
-	connections := window[0].Connections
 	goroutines := window[0].Goroutines
 	samples := make([]measurement.Sample, len(window))
 	for i, obs := range window {
-		if obs.Connections != connections || obs.Goroutines != goroutines {
+		if obs.ActiveUnits != criteria.ExpectedActiveUnits || obs.Goroutines != goroutines {
 			return false
 		}
 		samples[i] = measurement.Sample{

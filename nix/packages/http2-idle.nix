@@ -42,7 +42,7 @@ let
         postInstall
         ;
       version = sourceRev;
-      vendorHash = "sha256-RMzXHLMXZIO3Wk3sQlcJ8jvBb4kPLg7IJIwNj4dbdoI=";
+      vendorHash = "sha256-jPpwdR05f8C83zi0I25HBMEbjO4TVc7xV1lFnNt4/38=";
       env = {
         CGO_ENABLED = "0";
         GOTOOLCHAIN = "local";
@@ -84,12 +84,6 @@ let
     '';
     postCheck = ''
       export GOFLAGS="''${GOFLAGS:-} -mod=vendor"
-      unformatted=$(find . -name '*.go' -not -path './vendor/*' -print0 | xargs -0 -r gofmt -l)
-      if [ -n "$unformatted" ]; then
-        echo "gofmt would change:"
-        printf '%s\n' "$unformatted"
-        exit 1
-      fi
       go vet ./...
       go vet -tags integration ./...
     '';

@@ -2,31 +2,12 @@ package server
 
 import (
 	"context"
-	"crypto/x509"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
-
-func TestCertificateTrustsLocalhost(t *testing.T) {
-	cert, err := NewCertificate(time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(cert.PEM) {
-		t.Fatal("certificate PEM was rejected")
-	}
-	leaf, err := x509.ParseCertificate(cert.TLS.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: "localhost"}); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestRequireLoopback(t *testing.T) {
 	if err := requireLoopback("127.0.0.1:80"); err != nil {

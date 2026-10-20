@@ -49,7 +49,9 @@ nix run .#http2-idle -- --smoke --out ./local-smoke
 
 Flags that you set replace the defaults in `config/default.json`. Flags that you leave out keep the file's value. `--smoke` always uses counts 0 and 200 and 3 rounds.
 
-Useful flags: `--counts`, `--rounds`, `--seed`, `--dial-concurrency`, `--max-trial-retries`, `--gomaxprocs`, `--gogc`, `--godebug`, `--stability-polls`, `--poll-interval-ms`, `--stability-timeout-sec`, `--samples`, `--sample-interval-ms`, `--rss-drift-pct`, `--rss-drift-bytes`, `--gc-policy`, `--out`.
+Useful flags: `--counts`, `--rounds`, `--seed`, `--dial-concurrency`, `--dial-retries`, `--max-trial-retries`, `--gomaxprocs`, `--gogc`, `--godebug`, `--stability-polls`, `--poll-interval-ms`, `--stability-timeout-sec`, `--samples`, `--sample-interval-ms`, `--rss-drift-pct`, `--rss-drift-bytes`, `--gc-policy`, `--out`.
+
+`--dial-retries` is how many times one connection dial may be repeated. `--max-trial-retries` is how many times a whole failed trial may be repeated. They are not the same knob. The run directory name is created exclusively, so a second run in the same second does not append to the first.
 
 The Nix app also passes the server binaries, the client, the expected `runtime.Version` strings, the Go commit, and the nixpkgs revision. You do not set those by hand.
 

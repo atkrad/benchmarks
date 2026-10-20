@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/atkrad/benchmarks/internal/certutil"
 )
 
 // Options selects optional control routes. The workload listener always
@@ -31,7 +33,7 @@ type Server struct {
 	https   *http.Server
 	control *http.Server
 	counts  *counters
-	cert    Certificate
+	cert    certutil.Certificate
 	httpsLn net.Listener
 	ctrlLn  net.Listener
 }
@@ -42,7 +44,7 @@ func New(opts Options) (*Server, error) {
 	if now == nil {
 		now = time.Now
 	}
-	cert, err := NewCertificate(now())
+	cert, err := certutil.NewLoopback(now())
 	if err != nil {
 		return nil, err
 	}
@@ -82,32 +84,34 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() { errCh <- serveIgnoreClosed(s.https, s.httpsLn) }()
 	go func() { errCh <- serveIgnoreClosed(s.control, s.ctrlLn) }()
 
-	var first error
+	consumed := 0
+	var firstErr error
 	select {
 	case <-ctx.Done():
-	case err := <-errCh:
-		first = err
+	case firstErr = <-errCh:
+		consumed = 1
 	}
-	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = s.https.Shutdown(shut)
-	_ = s.control.Shutdown(shut)
+	_ = s.https.Shutdown(shutdownCtx)
+	_ = s.control.Shutdown(shutdownCtx)
 
-	pending := 2
-	if first != nil {
-		pending = 1
-	}
 	var errs []error
-	if first != nil {
-		errs = append(errs, first)
+	if consumed == 1 && firstErr == nil {
+		firstErr = errListenerStopped
 	}
-	for range pending {
+	if firstErr != nil {
+		errs = append(errs, firstErr)
+	}
+	for ; consumed < 2; consumed++ {
 		if err := <-errCh; err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
+
+var errListenerStopped = errors.New("listener stopped before shutdown")
 
 func serveIgnoreClosed(srv *http.Server, ln net.Listener) error {
 	err := srv.Serve(ln)
@@ -117,7 +121,7 @@ func serveIgnoreClosed(srv *http.Server, ln net.Listener) error {
 	return err
 }
 
-func newWorkload(cert Certificate, counts *counters, idle time.Duration) (*http.Server, net.Listener, error) {
+func newWorkload(cert certutil.Certificate, counts *counters, idle time.Duration) (*http.Server, net.Listener, error) {
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen https: %w", err)

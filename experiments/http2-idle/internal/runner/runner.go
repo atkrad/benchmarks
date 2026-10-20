@@ -28,8 +28,21 @@ import (
 const (
 	fdMargin        = 256
 	readyTimeout    = 30 * time.Second
+	maxSampleSkew   = 5 * time.Second
 	benchstatIgnore = "case,go-version,godebug,server-sha256"
 )
+
+// benchfmtInvariants must match across case files or benchstat splits the tables.
+var benchfmtInvariants = []string{
+	"goos",
+	"goarch",
+	"cpu",
+	"gc-policy",
+	"gomaxprocs",
+	"gogc",
+	"run-id",
+	"run-kind",
+}
 
 // Child is a process the runner can talk to. *process.Proc implements it.
 type Child interface {
@@ -82,8 +95,16 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		hashes[path] = sum
 	}
 
-	runID := deps.Now().UTC().Format("20060102T150405Z") + "-seed" + strconv.FormatUint(cfg.Seed, 10)
-	dir := filepath.Join(cfg.OutputDir, "http2-idle", runID)
+	parent := filepath.Join(cfg.OutputDir, "http2-idle")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	prefix := deps.Now().UTC().Format("20060102T150405Z") + "-"
+	dir, err := os.MkdirTemp(parent, prefix)
+	if err != nil {
+		return fmt.Errorf("create run directory: %w", err)
+	}
+	runID := filepath.Base(dir)
 	if err := os.MkdirAll(filepath.Join(dir, "benchfmt"), 0o755); err != nil {
 		return err
 	}
@@ -115,12 +136,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	defer trials.Close()
+	defer func() { _ = trials.Close() }()
 	samples, err := report.CreateJSONLines(filepath.Join(dir, "samples.jsonl"))
 	if err != nil {
 		return err
 	}
-	defer samples.Close()
+	defer func() { _ = samples.Close() }()
 	eng.trials = trials
 	eng.samples = samples
 
@@ -238,7 +259,7 @@ func (e *engine) probe(ctx context.Context) error {
 }
 
 func (e *engine) goroutines(ctx context.Context, cas runCase, n int) (int, error) {
-	rec, err := e.trial(ctx, experiment.Cell{Case: cas.Name, Connections: n, Round: -1}, cas, "probe", 0)
+	rec, err := e.trial(ctx, experiment.Cell{Case: cas.Name, Load: n, Round: -1}, cas, "probe", 0)
 	if appendErr := e.trials.Append(rec); appendErr != nil {
 		return 0, appendErr
 	}
@@ -248,33 +269,36 @@ func (e *engine) goroutines(ctx context.Context, cas runCase, n int) (int, error
 	return rec.Goroutines, nil
 }
 
-func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, phase string, attempt int) (trialRecord, error) {
+func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, phase string, attempt int) (rec trialRecord, trialErr error) {
 	started := e.deps.Now()
-	rec := trialRecord{
-		Phase: phase, Case: cell.Case, Connections: cell.Connections, Round: cell.Round,
+	rec = trialRecord{
+		Phase: phase, Case: cell.Case, Connections: cell.Load, Round: cell.Round,
 		Attempt: attempt, Started: started.Format(time.RFC3339Nano),
 		GODEBUG: cas.GODEBUG, SHA256: e.hashes[cas.Binary],
 	}
-	var stderr strings.Builder
+	var srv, cli Child
+	defer func() {
+		text := stopChild(cli) + stopChild(srv)
+		rec.Stderr = clip(text, 4096)
+		if rec.Finished == "" {
+			rec.Finished = e.deps.Now().Format(time.RFC3339Nano)
+		}
+	}()
 	fail := func(err error) (trialRecord, error) {
 		rec.Success = false
 		rec.Error = err.Error()
 		rec.Finished = e.deps.Now().Format(time.RFC3339Nano)
-		rec.Stderr = clip(stderr.String(), 4096)
+		trialErr = err
 		return rec, err
 	}
 
 	trialCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	srv, err := e.deps.Start(trialCtx, serverSpec(cas, e.cfg))
+	var err error
+	srv, err = e.deps.Start(trialCtx, serverSpec(cas, e.cfg))
 	if err != nil {
 		return fail(err)
 	}
-	defer func() {
-		_ = srv.Kill()
-		res, _ := srv.Wait()
-		stderr.WriteString(res.Stderr)
-	}()
 	rec.PID = srv.PID()
 
 	readyCtx, readyCancel := context.WithTimeout(trialCtx, readyTimeout)
@@ -296,22 +320,16 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 	rec.GoVersion = ready.GoVersion
 	base := "http://" + ready.ControlAddr
 
-	var cli Child
-	if cell.Connections > 0 {
+	if cell.Load > 0 {
 		certPath, err := writeCert(ready.CertPEM)
 		if err != nil {
 			return fail(err)
 		}
-		defer os.RemoveAll(filepath.Dir(certPath))
-		cli, err = e.deps.Start(trialCtx, clientSpec(e.cfg, ready.HTTPSAddr, certPath, cell.Connections))
+		defer func() { _ = os.RemoveAll(filepath.Dir(certPath)) }()
+		cli, err = e.deps.Start(trialCtx, clientSpec(e.cfg, ready.HTTPSAddr, certPath, cell.Load))
 		if err != nil {
 			return fail(err)
 		}
-		defer func() {
-			_ = cli.Kill()
-			res, _ := cli.Wait()
-			stderr.WriteString(res.Stderr)
-		}()
 		clientReady, err := e.readClientReady(trialCtx, cli)
 		if err != nil {
 			return fail(err)
@@ -330,7 +348,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		if err != nil {
 			return experiment.Observation{}, err
 		}
-		if err := checkHeld(cell.Connections, stats); err != nil {
+		if err := checkHeld(cell.Load, stats); err != nil {
 			// A mismatch resets the window instead of failing the poll,
 			// unless the server is reporting the wrong protocol.
 			if stats.NonH2Requests != 0 || stats.WriteErrors != 0 {
@@ -345,8 +363,8 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		if err != nil {
 			return experiment.Observation{}, err
 		}
-		return experiment.Observation{Connections: int(stats.Open), Goroutines: stats.Goroutines, RSSBytes: rss}, nil
-	}, e.criteria(), e.deps.Now, e.deps.Sleep)
+		return experiment.Observation{ActiveUnits: int(stats.Open), Goroutines: stats.Goroutines, RSSBytes: rss}, nil
+	}, e.criteria(cell.Load), e.deps.Now, e.deps.Sleep)
 	if err != nil {
 		return fail(err)
 	}
@@ -367,7 +385,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		if err != nil {
 			return fail(err)
 		}
-		if err := checkHeld(cell.Connections, sample.stats); err != nil {
+		if err := checkHeld(cell.Load, sample.stats); err != nil {
 			return fail(err)
 		}
 		last = sample.stats
@@ -377,6 +395,23 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 			if err := e.samples.Append(sample.record(cell, attempt, i)); err != nil {
 				return fail(err)
 			}
+		}
+	}
+
+	// Profile while the held connections are still idle, before recheck or close.
+	if cfgSmokeProfile(e.cfg, cell) {
+		body, err := e.deps.Get(trialCtx, base+"/debug/pprof/goroutine?debug=1")
+		if err != nil {
+			return fail(err)
+		}
+		name := fmt.Sprintf("%s-n%d.txt", cell.Case, cell.Load)
+		path := filepath.Join(e.dir, "diagnostics", name)
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			return fail(err)
+		}
+		sum := SummarizeProfile(string(body))
+		if err := report.WriteJSONFile(filepath.Join(e.dir, "diagnostics", name+".summary.json"), sum); err != nil {
+			return fail(err)
 		}
 	}
 
@@ -399,7 +434,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 	if err != nil {
 		return fail(err)
 	}
-	if err := checkStats(cell.Connections, final, cas.Expect, e.deps.Now()); err != nil {
+	if err := checkStats(cell.Load, final, cas.Expect, e.deps.Now()); err != nil {
 		return fail(err)
 	}
 	if cli != nil {
@@ -410,46 +445,35 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 			return fail(err)
 		}
 	}
-	if cfgSmokeProfile(e.cfg, cell) {
-		body, err := e.deps.Get(trialCtx, base+"/debug/pprof/goroutine?debug=1")
-		if err != nil {
-			return fail(err)
-		}
-		name := fmt.Sprintf("%s-n%d.txt", cell.Case, cell.Connections)
-		path := filepath.Join(e.dir, "diagnostics", name)
-		if err := os.WriteFile(path, body, 0o644); err != nil {
-			return fail(err)
-		}
-		sum := SummarizeProfile(string(body))
-		if err := report.WriteJSONFile(filepath.Join(e.dir, "diagnostics", name+".summary.json"), sum); err != nil {
-			return fail(err)
-		}
-	}
 
 	rec.Success = true
 	rec.Finished = e.deps.Now().Format(time.RFC3339Nano)
 	rec.Goroutines = last.Goroutines
 	rec.RSSBytes = uint64(median(rss))
 	if phase == "run" {
-		e.addResult(cas, cell.Connections, ready.GoVersion, median(rss), median(goro), last)
+		e.addResult(cas, cell.Load, ready.GoVersion, median(rss), median(goro), last)
 	}
 	return rec, nil
 }
 
 type observation struct {
-	stats protocol.Stats
-	mem   measurement.Memory
-	rss   uint64
-	at    time.Time
-	memAt time.Time
+	stats   protocol.Stats
+	mem     measurement.Memory
+	rss     uint64
+	statsAt time.Time
+	memAt   time.Time
+	skew    time.Duration
 }
 
 func (o observation) record(cell experiment.Cell, attempt, index int) map[string]any {
 	return map[string]any{
-		"case": cell.Case, "connections": cell.Connections, "round": cell.Round,
+		"case": cell.Case, "connections": cell.Load, "round": cell.Round,
 		"attempt": attempt, "index": index,
-		"stats_at": o.stats.WallTime, "memory_at": o.memAt.Format(time.RFC3339Nano),
-		"rss_bytes": o.rss, "rss_supported": o.mem.RSS.Supported,
+		"stats_at":      o.stats.WallTime,
+		"host_stats_at": o.statsAt.Format(time.RFC3339Nano),
+		"memory_at":     o.memAt.Format(time.RFC3339Nano),
+		"skew_ns":       o.skew.Nanoseconds(),
+		"rss_bytes":     o.rss, "rss_supported": o.mem.RSS.Supported,
 		"anon_bytes": o.mem.Anon.Bytes, "anon_supported": o.mem.Anon.Supported,
 		"peak_bytes": o.mem.Peak.Bytes, "peak_supported": o.mem.Peak.Supported,
 		"heap_alloc": o.stats.HeapAlloc, "stack_inuse": o.stats.StackInuse,
@@ -475,8 +499,25 @@ func (e *engine) observe(ctx context.Context, base string, pid int) (observation
 	if err != nil {
 		return observation{}, fmt.Errorf("rss: %w", err)
 	}
-	_ = statsAt
-	return observation{stats: stats, mem: mem, rss: rss, at: statsAt, memAt: memAt}, nil
+	skew := memAt.Sub(statsAt)
+	if skew < 0 {
+		skew = -skew
+	}
+	if skew > maxSampleSkew {
+		return observation{}, fmt.Errorf("memory sample is %s after the runtime sample", skew)
+	}
+	wall, err := time.Parse(time.RFC3339Nano, stats.WallTime)
+	if err != nil {
+		return observation{}, fmt.Errorf("stats wall time: %w", err)
+	}
+	wallSkew := statsAt.Sub(wall)
+	if wallSkew < 0 {
+		wallSkew = -wallSkew
+	}
+	if wallSkew > maxSampleSkew {
+		return observation{}, fmt.Errorf("runtime sample is %s away from the host clock", wallSkew)
+	}
+	return observation{stats: stats, mem: mem, rss: rss, statsAt: statsAt, memAt: memAt, skew: skew}, nil
 }
 
 func (e *engine) addResult(cas runCase, connections int, goVersion string, rss, goro float64, stats protocol.Stats) {
@@ -492,10 +533,8 @@ func (e *engine) addResult(cas runCase, connections int, goVersion string, rss, 
 		}}
 		e.byCase[cas.Name] = file
 	}
-	memRSS := float64(stats.HeapAlloc) // replaced below when the caller passes rss
-	_ = memRSS
 	file.results = append(file.results, report.Result{
-		Name: report.ConnectionsName(connections),
+		Name: connectionsName(connections),
 		Values: []report.Value{
 			{Value: rss, Unit: "rss-B"},
 			{Value: float64(stats.StackInuse), Unit: "stack-inuse-B"},
@@ -523,7 +562,7 @@ func (e *engine) finish(incomplete bool) error {
 		})
 	}
 	if len(files) > 0 {
-		keys := append(append([]string{}, report.InvariantKeys...), "run-kind")
+		keys := benchfmtInvariants
 		if err := report.EqualInvariants(files, keys); err != nil {
 			return err
 		}
@@ -578,13 +617,14 @@ func (e *engine) summaries() []map[string]any {
 	return out
 }
 
-func (e *engine) criteria() experiment.Criteria {
+func (e *engine) criteria(load int) experiment.Criteria {
 	return experiment.Criteria{
-		MinPolls:     e.cfg.StabilityPolls,
-		Interval:     time.Duration(e.cfg.PollIntervalMS) * time.Millisecond,
-		Timeout:      time.Duration(e.cfg.StabilityTimeout) * time.Second,
-		DriftPercent: e.cfg.RSSDriftPercent,
-		DriftBytes:   e.cfg.RSSDriftBytes,
+		ExpectedActiveUnits: load,
+		MinPolls:            e.cfg.StabilityPolls,
+		Interval:            time.Duration(e.cfg.PollIntervalMS) * time.Millisecond,
+		Timeout:             time.Duration(e.cfg.StabilityTimeout) * time.Second,
+		DriftPercent:        e.cfg.RSSDriftPercent,
+		DriftBytes:          e.cfg.RSSDriftBytes,
 	}
 }
 
@@ -689,7 +729,7 @@ func httpDo(ctx context.Context, client *http.Client, method, url string) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, err
@@ -722,7 +762,7 @@ func clientSpec(cfg Config, httpsAddr, certPath string, n int) process.Spec {
 			"-cert", certPath,
 			"-n", strconv.Itoa(n),
 			"-dial-concurrency", strconv.Itoa(cfg.DialConcurrency),
-			"-max-retries", "2",
+			"-max-retries", strconv.Itoa(cfg.DialRetries),
 			"-server-name", "localhost",
 		},
 		Env:         []string{"GOTOOLCHAIN=local"},
@@ -778,7 +818,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("hash %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", fmt.Errorf("hash %s: %w", path, err)
@@ -840,6 +880,19 @@ func indexCase(cases []runCase, name string) int {
 	return 0
 }
 
+func connectionsName(n int) string {
+	return "HTTP2Idle/connections=" + strconv.Itoa(n)
+}
+
+func stopChild(child Child) string {
+	if child == nil {
+		return ""
+	}
+	_ = child.Kill()
+	res, _ := child.Wait()
+	return res.Stderr
+}
+
 func median(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -882,7 +935,7 @@ func cfgSmokeProfile(cfg Config, cell experiment.Cell) bool {
 	if !cfg.Smoke {
 		return false
 	}
-	return cell.Connections == maxCount(cfg.ConnectionCounts) && cell.Round == 0
+	return cell.Load == maxCount(cfg.ConnectionCounts) && cell.Round == 0
 }
 
 func infoOr(value, fallback string) string {
