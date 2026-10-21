@@ -1,0 +1,19 @@
+Unit goroutines assume=exact
+case: go127
+cpu: test-cpu
+gc-policy: natural
+go-version: go1.27.2
+goarch: amd64
+godebug: 
+gogc: 100
+gomaxprocs: 12
+goos: linux
+run-id: golden
+server-sha256: aa
+
+BenchmarkHTTP2Idle/connections=0 1 1000 rss-B 10 goroutines
+BenchmarkHTTP2Idle/connections=0 1 1010 rss-B 10 goroutines
+BenchmarkHTTP2Idle/connections=0 1 1005 rss-B 10 goroutines
+BenchmarkHTTP2Idle/connections=1000 1 2000 rss-B 10 goroutines
+BenchmarkHTTP2Idle/connections=1000 1 2010 rss-B 10 goroutines
+BenchmarkHTTP2Idle/connections=1000 1 2005 rss-B 10 goroutines

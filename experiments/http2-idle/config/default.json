@@ -1,0 +1,20 @@
+{
+  "connection_counts": [0, 1000, 5000],
+  "rounds": 10,
+  "dial_concurrency": 32,
+  "max_trial_retries": 1,
+  "dial_retries": 2,
+  "seed": 1,
+  "gomaxprocs": 12,
+  "gogc": 100,
+  "godebug": "",
+  "stability_polls": 5,
+  "poll_interval_ms": 1000,
+  "stability_timeout_sec": 60,
+  "sample_count": 3,
+  "sample_interval_ms": 1000,
+  "rss_drift_tolerance_pct": 2,
+  "rss_drift_tolerance_bytes": 1048576,
+  "gc_policy": "natural",
+  "output_dir": ""
+}

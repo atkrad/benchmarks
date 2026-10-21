@@ -1,0 +1,39 @@
+# Builds, tests, and static checks only. This workflow does not run the
+# memory experiment, a smoke run, go test -bench, or benchstat on real data.
+# Go 1.28-dev is compiled from the pinned source during nix flake check.
+# nix run .#fmt is not used here: it edits files. fmt-check only reports drift.
+name: ci
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - name: Build packages and run sandboxed tests
+        run: nix flake check -L
+
+  go-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - name: Format check
+        run: nix run .#fmt-check
+      - name: Lint
+        run: nix run .#lint
+      - name: Vet
+        run: nix run .#vet
+      - name: Unit tests
+        run: nix run .#test
+      - name: Integration tests
+        run: nix run .#test-integration
+      - name: Race detector
+        run: nix run .#test-race
