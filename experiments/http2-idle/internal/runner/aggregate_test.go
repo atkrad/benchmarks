@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,23 @@ func TestAddResultUsesAggregatedMetrics(t *testing.T) {
 	assert.Equal(t, 20.0, got["heap-idle-B"])
 	assert.Equal(t, 2.0, got["heap-released-B"])
 	assert.Equal(t, 6.5, got["goroutines"])
+}
+
+func TestTrialRecordKeepsFractionalMedian(t *testing.T) {
+	metrics, err := aggregateSamples([]observation{
+		{rss: 100, stats: protocol.Stats{Goroutines: 1}},
+		{rss: 101, stats: protocol.Stats{Goroutines: 2}},
+	})
+	require.NoError(t, err)
+
+	rec := trialRecord{RSSBytes: metrics.RSS, Goroutines: metrics.Goroutines}
+	raw, err := json.Marshal(rec)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.InDelta(t, 100.5, got["rss_bytes"], 0)
+	assert.InDelta(t, 1.5, got["goroutines"], 0)
 }
 
 func systemInfoForTest() system.Info {

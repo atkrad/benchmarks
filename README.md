@@ -54,16 +54,39 @@ nix run .#lint
 nix run .#vet
 nix run .#fmt
 nix run .#fmt-check
+nix run .#pre-commit
 nix flake check
 ```
 
 `fmt` rewrites Go sources. `fmt-check` only prints a diff and fails when one
 exists. CI runs `fmt-check`, not `fmt`.
 
-`nix build` and `nix flake check` are hermetic. They use the vendored module
-hash. Integration tests open a few local connections to check behavior; they
-are not a benchmark. Unit tests do not open sockets, so they can run inside
-the Nix sandbox.
+`nix run .#test` runs `go test` on the working tree. `nix flake check` builds
+the packages in `checks` and runs each package's unit tests inside the Nix
+sandbox. Integration tests open a few local connections to check behavior, so
+they stay on `nix run .#test-integration` and out of the sandbox. None of
+these commands is a benchmark.
+
+## Pre-commit
+
+Entering the development shell installs a Git hook. direnv does the same
+thing, because `.envrc` is `use flake`.
+
+The hook checks four things: Go formatting with the pinned golangci-lint,
+merge-conflict markers, trailing whitespace, and a final newline. It does not
+run the test suite, the race detector, or a benchmark.
+
+```sh
+nix run .#pre-commit
+```
+
+That runs the same hooks without creating a commit. Apply formatting with
+`nix run .#fmt`. A failed hook exits non-zero.
+
+Pre-commit is not a substitute for CI. CI still runs formatting, lint, vet,
+unit tests, integration tests, the race detector, and `nix flake check`. The
+Go formatter needs the module cache, so the pre-commit set is not one of the
+sandboxed flake checks.
 
 ## Experiments
 

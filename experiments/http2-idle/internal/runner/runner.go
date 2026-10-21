@@ -232,10 +232,10 @@ type trialRecord struct {
 	SHA256      string `json:"server_sha256,omitempty"`
 	Retries     int    `json:"client_retries,omitempty"`
 	Stderr      string `json:"stderr,omitempty"`
-	// Goroutines and RSSBytes are medians over the trial sample window.
-	// Goroutines is float64 so an even-sized window can keep a half count.
+	// Goroutines and RSSBytes are medians of the trial sample window.
+	// Both stay float64 so an even-sized window can keep a half unit.
 	Goroutines float64 `json:"goroutines,omitempty"`
-	RSSBytes   uint64  `json:"rss_bytes,omitempty"`
+	RSSBytes   float64 `json:"rss_bytes,omitempty"`
 }
 
 func (e *engine) probe(ctx context.Context) error {
@@ -452,7 +452,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 	rec.Success = true
 	rec.Finished = e.deps.Now().Format(time.RFC3339Nano)
 	rec.Goroutines = metrics.Goroutines
-	rec.RSSBytes = uint64(metrics.RSS)
+	rec.RSSBytes = metrics.RSS
 	if phase == "run" {
 		e.addResult(cas, cell.Load, ready.GoVersion, metrics)
 	}

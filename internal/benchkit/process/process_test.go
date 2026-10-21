@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -210,11 +212,23 @@ func TestCancelKillsProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	grandchild, err := strconv.Atoi(string(raw))
+	grandchild, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	started := startTime(grandchild)
+	if started == "" {
+		t.Fatalf("grandchild %d has no start time (%s)", grandchild, procStat(grandchild))
+	}
+	// The child is the process-group leader. The grandchild must share that group
+	// so the cancel signal reaches it.
+	childGroup := processGroup(proc.PID())
+	if childGroup != strconv.Itoa(proc.PID()) {
+		t.Fatalf("child %d process group = %q, want its own pid", proc.PID(), childGroup)
+	}
+	if got := processGroup(grandchild); got != childGroup {
+		t.Fatalf("grandchild %d process group = %q, want %s", grandchild, got, childGroup)
+	}
 
 	cancel()
 	res, err := proc.Wait()
@@ -224,9 +238,11 @@ func TestCancelKillsProcessGroup(t *testing.T) {
 	if res.ExitCode == 0 {
 		t.Fatalf("exit = 0 after cancel, stderr = %q", res.Stderr)
 	}
-	if running(grandchild) && startTime(grandchild) == started {
-		t.Fatalf("grandchild %d still running (%s)", grandchild, procStat(grandchild))
-	}
+	// SIGKILL is asynchronous. The grandchild can still be visible in /proc
+	// for a short time after the direct child has been waited on.
+	require.Eventually(t, func() bool {
+		return !running(grandchild) || startTime(grandchild) != started
+	}, 2*time.Second, 10*time.Millisecond)
 	if running(proc.PID()) {
 		t.Fatalf("child %d still running", proc.PID())
 	}
@@ -299,4 +315,13 @@ func startTime(pid int) string {
 		return ""
 	}
 	return fields[19]
+}
+
+func processGroup(pid int) string {
+	fields := statFields(pid)
+	// pgrp is the 3rd field after the command name.
+	if len(fields) < 3 {
+		return ""
+	}
+	return fields[2]
 }

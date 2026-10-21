@@ -1,10 +1,16 @@
 {
   description = "Reproducible Go benchmarks";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/26f4107e47e3ad0ffd0db220469ba83b6f6d96e8";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/26f4107e47e3ad0ffd0db220469ba83b6f6d96e8";
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, git-hooks }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -84,6 +90,53 @@
         type = "app";
         program = "${pkg}/bin/${executable}";
       };
+      # Check formatting only. Developers run `nix run .#fmt` to rewrite files.
+      goFormatCheck = pkgs.writeShellApplication {
+        name = "check-go-format";
+        runtimeInputs = [
+          pkgs.benchmarks.go_1_27_2
+          pkgs.benchmarks.golangci-lint
+        ];
+        text = ''
+          export GOTOOLCHAIN=local
+          diff=$(golangci-lint fmt --diff)
+          if [ -n "$diff" ]; then
+            printf '%s\n' "$diff"
+            exit 1
+          fi
+        '';
+      };
+      # Hooks run on the working tree. The Go formatter needs the module cache,
+      # so this set is not a sandboxed flake check.
+      preCommit = git-hooks.lib.${system}.run {
+        src = self;
+        hooks = {
+          check-merge-conflicts.enable = true;
+          end-of-file-fixer.enable = true;
+          trim-trailing-whitespace = {
+            enable = true;
+            # Benchfmt fixtures keep a trailing space on an empty value.
+            excludes = [ "testdata/" ];
+          };
+          go-format-check = {
+            enable = true;
+            name = "Go formatting";
+            entry = "${goFormatCheck}/bin/check-go-format";
+            files = "\\.go$";
+            pass_filenames = false;
+          };
+        };
+      };
+      preCommitRun = pkgs.writeShellApplication {
+        name = "benchmarks-pre-commit";
+        runtimeInputs = [ preCommit.config.package ];
+        text = ''
+          exec ${pkgs.lib.getExe preCommit.config.package} \
+            run --all-files \
+            --config ${preCommit.config.configFile} \
+            "$@"
+        '';
+      };
     in
     {
       packages.${system} = {
@@ -111,6 +164,7 @@
         vet = mkApp taskBins.vet "benchmarks-vet";
         fmt = mkApp taskBins.fmt "benchmarks-fmt";
         fmt-check = mkApp taskBins.fmt-check "benchmarks-fmt-check";
+        pre-commit = mkApp preCommitRun "benchmarks-pre-commit";
       };
 
       checks.${system} = {
@@ -131,7 +185,8 @@
           pkgs.benchmarks.benchstat
           pkgs.git
           pkgs.jq
-        ];
+        ] ++ preCommit.enabledPackages;
+        shellHook = preCommit.shellHook;
         env = {
           CGO_ENABLED = "1";
           GOTOOLCHAIN = "local";

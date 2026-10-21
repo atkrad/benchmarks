@@ -131,9 +131,10 @@ Replace `<run-id>` with the directory name the runner created under
 `http2-idle/`.
 
 `trials.jsonl` and `samples.jsonl` are the source data. Each `samples.jsonl`
-line is one raw observation. Each successful trial contributes one benchfmt
-row whose values are the medians of that trial's sample window. Failed
-attempts stay in `trials.jsonl` only.
+line is one raw observation. A successful trial stores the same medians in
+`trials.jsonl` and in one benchfmt row. An even-sized window can leave
+`rss_bytes` and `goroutines` on a half unit. Failed attempts stay in
+`trials.jsonl` only.
 
 `summary.json` has per-case medians and ranges, and a baseline-adjusted RSS
 (the case's median minus its own zero-connection median). That subtraction is
