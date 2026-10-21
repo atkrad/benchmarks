@@ -89,7 +89,7 @@ func (j *JSONLines) Append(v any) error {
 	return nil
 }
 
-// Close closes the file.
+// Close closes the underlying file.
 func (j *JSONLines) Close() error {
 	if err := j.file.Close(); err != nil {
 		return fmt.Errorf("close jsonl: %w", err)

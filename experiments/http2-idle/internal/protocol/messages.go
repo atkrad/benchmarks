@@ -1,4 +1,5 @@
-// Package protocol is the line-delimited JSON spoken by the HTTP/2 idle experiment.
+// Package protocol defines the line-delimited JSON events exchanged by the
+// HTTP/2 idle experiment's server, client, and runner.
 package protocol
 
 import (
@@ -11,6 +12,7 @@ import (
 // Version is the only protocol version this tree speaks.
 const Version = 1
 
+// Event names appear in every encoded message.
 const (
 	EventReady         = "ready"
 	EventProgress      = "progress"

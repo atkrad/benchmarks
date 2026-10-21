@@ -20,9 +20,10 @@ type Cell struct {
 	Round int
 }
 
-// Plan returns rounds shuffled copies of every (case, load) pair.
-// The shuffle for a seed is fixed. Every cell appears once. Loads may be
-// zero (a baseline) but not negative, and neither cases nor loads may repeat.
+// Plan returns a reproducible sequence of trials for each case and load
+// combination. Trials are shuffled within each round using seed. Every cell
+// appears once. Loads may be zero (a baseline) but not negative, and neither
+// cases nor loads may repeat.
 func Plan(cases []string, loads []int, rounds int, seed uint64) ([]Cell, error) {
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("%w: no cases", ErrInvalidPlan)

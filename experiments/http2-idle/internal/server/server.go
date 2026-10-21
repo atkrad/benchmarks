@@ -1,4 +1,5 @@
-// Package server is the measured HTTP/2 process.
+// Package server is the measured HTTP/2 process under test.
+// Workload traffic and the control endpoint use separate listeners.
 package server
 
 import (

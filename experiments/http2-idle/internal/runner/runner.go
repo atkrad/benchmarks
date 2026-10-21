@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -231,8 +232,10 @@ type trialRecord struct {
 	SHA256      string `json:"server_sha256,omitempty"`
 	Retries     int    `json:"client_retries,omitempty"`
 	Stderr      string `json:"stderr,omitempty"`
-	Goroutines  int    `json:"goroutines,omitempty"`
-	RSSBytes    uint64 `json:"rss_bytes,omitempty"`
+	// Goroutines and RSSBytes are medians over the trial sample window.
+	// Goroutines is float64 so an even-sized window can keep a half count.
+	Goroutines float64 `json:"goroutines,omitempty"`
+	RSSBytes   uint64  `json:"rss_bytes,omitempty"`
 }
 
 func (e *engine) probe(ctx context.Context) error {
@@ -266,7 +269,7 @@ func (e *engine) goroutines(ctx context.Context, cas runCase, n int) (int, error
 	if err != nil {
 		return 0, err
 	}
-	return rec.Goroutines, nil
+	return int(math.Round(rec.Goroutines)), nil
 }
 
 func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, phase string, attempt int) (rec trialRecord, trialErr error) {
@@ -372,9 +375,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		return fail(errors.New("stability window was not reached"))
 	}
 
-	var rss []float64
-	var goro []float64
-	var last protocol.Stats
+	samples := make([]observation, 0, e.cfg.SampleCount)
 	for i := range e.cfg.SampleCount {
 		if i > 0 {
 			if err := e.deps.Sleep(trialCtx, time.Duration(e.cfg.SampleIntervalMS)*time.Millisecond); err != nil {
@@ -388,14 +389,16 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		if err := checkHeld(cell.Load, sample.stats); err != nil {
 			return fail(err)
 		}
-		last = sample.stats
-		rss = append(rss, float64(sample.rss))
-		goro = append(goro, float64(sample.stats.Goroutines))
+		samples = append(samples, sample)
 		if phase == "run" {
 			if err := e.samples.Append(sample.record(cell, attempt, i)); err != nil {
 				return fail(err)
 			}
 		}
+	}
+	metrics, err := aggregateSamples(samples)
+	if err != nil {
+		return fail(err)
 	}
 
 	// Profile while the held connections are still idle, before recheck or close.
@@ -448,12 +451,55 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 
 	rec.Success = true
 	rec.Finished = e.deps.Now().Format(time.RFC3339Nano)
-	rec.Goroutines = last.Goroutines
-	rec.RSSBytes = uint64(median(rss))
+	rec.Goroutines = metrics.Goroutines
+	rec.RSSBytes = uint64(metrics.RSS)
 	if phase == "run" {
-		e.addResult(cas, cell.Load, ready.GoVersion, median(rss), median(goro), last)
+		e.addResult(cas, cell.Load, ready.GoVersion, metrics)
 	}
 	return rec, nil
+}
+
+// trialMetrics is the per-trial aggregate written to benchfmt and trials.jsonl.
+// Every field is the median of that metric over the sample window.
+type trialMetrics struct {
+	RSS          float64
+	Goroutines   float64
+	HeapAlloc    float64
+	StackInuse   float64
+	HeapInuse    float64
+	HeapIdle     float64
+	HeapReleased float64
+}
+
+func aggregateSamples(samples []observation) (trialMetrics, error) {
+	if len(samples) == 0 {
+		return trialMetrics{}, errors.New("aggregate samples: empty sample set")
+	}
+	rss := make([]float64, 0, len(samples))
+	goroutines := make([]float64, 0, len(samples))
+	heapAlloc := make([]float64, 0, len(samples))
+	stackInuse := make([]float64, 0, len(samples))
+	heapInuse := make([]float64, 0, len(samples))
+	heapIdle := make([]float64, 0, len(samples))
+	heapReleased := make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		rss = append(rss, float64(sample.rss))
+		goroutines = append(goroutines, float64(sample.stats.Goroutines))
+		heapAlloc = append(heapAlloc, float64(sample.stats.HeapAlloc))
+		stackInuse = append(stackInuse, float64(sample.stats.StackInuse))
+		heapInuse = append(heapInuse, float64(sample.stats.HeapInuse))
+		heapIdle = append(heapIdle, float64(sample.stats.HeapIdle))
+		heapReleased = append(heapReleased, float64(sample.stats.HeapReleased))
+	}
+	return trialMetrics{
+		RSS:          median(rss),
+		Goroutines:   median(goroutines),
+		HeapAlloc:    median(heapAlloc),
+		StackInuse:   median(stackInuse),
+		HeapInuse:    median(heapInuse),
+		HeapIdle:     median(heapIdle),
+		HeapReleased: median(heapReleased),
+	}, nil
 }
 
 type observation struct {
@@ -520,7 +566,7 @@ func (e *engine) observe(ctx context.Context, base string, pid int) (observation
 	return observation{stats: stats, mem: mem, rss: rss, statsAt: statsAt, memAt: memAt, skew: skew}, nil
 }
 
-func (e *engine) addResult(cas runCase, connections int, goVersion string, rss, goro float64, stats protocol.Stats) {
+func (e *engine) addResult(cas runCase, connections int, goVersion string, metrics trialMetrics) {
 	file := e.byCase[cas.Name]
 	if file == nil {
 		file = &caseFile{config: map[string]string{
@@ -536,13 +582,13 @@ func (e *engine) addResult(cas runCase, connections int, goVersion string, rss, 
 	file.results = append(file.results, report.Result{
 		Name: connectionsName(connections),
 		Values: []report.Value{
-			{Value: rss, Unit: "rss-B"},
-			{Value: float64(stats.StackInuse), Unit: "stack-inuse-B"},
-			{Value: float64(stats.HeapAlloc), Unit: "heap-alloc-B"},
-			{Value: float64(stats.HeapInuse), Unit: "heap-inuse-B"},
-			{Value: float64(stats.HeapIdle), Unit: "heap-idle-B"},
-			{Value: float64(stats.HeapReleased), Unit: "heap-released-B"},
-			{Value: goro, Unit: "goroutines"},
+			{Value: metrics.RSS, Unit: "rss-B"},
+			{Value: metrics.StackInuse, Unit: "stack-inuse-B"},
+			{Value: metrics.HeapAlloc, Unit: "heap-alloc-B"},
+			{Value: metrics.HeapInuse, Unit: "heap-inuse-B"},
+			{Value: metrics.HeapIdle, Unit: "heap-idle-B"},
+			{Value: metrics.HeapReleased, Unit: "heap-released-B"},
+			{Value: metrics.Goroutines, Unit: "goroutines"},
 		},
 	})
 }
@@ -577,13 +623,13 @@ func (e *engine) finish(incomplete bool) error {
 			}
 		}
 	}
-	cmd := "benchstat -ignore " + benchstatIgnore + " go127.txt go128.txt go128off.txt"
+	cmd := "benchstat -ignore " + benchstatIgnore + " benchfmt/go127.txt benchfmt/go128.txt benchfmt/go128off.txt"
 	summary := map[string]any{
 		"publication": !e.cfg.Smoke && !incomplete,
 		"incomplete":  incomplete,
 		"smoke":       e.cfg.Smoke,
 		"benchstat":   cmd,
-		"note":        "benchstat compares independent trials. It does not remove host noise. Baseline-adjusted RSS subtracts the same case at 0 connections from the raw median.",
+		"note":        "Each benchfmt value is the median of that trial's sample window. benchstat compares independent trials. It does not remove host noise. Baseline-adjusted RSS subtracts the same case at 0 connections from the raw median.",
 		"cases":       e.summaries(),
 	}
 	return report.WriteJSONFile(filepath.Join(e.dir, "summary.json"), summary)

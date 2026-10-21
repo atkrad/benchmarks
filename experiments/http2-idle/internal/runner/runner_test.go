@@ -161,6 +161,12 @@ func TestRunRecordsTrialsAndBenchfmt(t *testing.T) {
 	if !json.Valid(summary) {
 		t.Fatal("summary is not json")
 	}
+	var summaryObj map[string]any
+	require.NoError(t, json.Unmarshal(summary, &summaryObj))
+	cmd, _ := summaryObj["benchstat"].(string)
+	require.Contains(t, cmd, "benchfmt/go127.txt")
+	require.Contains(t, cmd, "benchfmt/go128.txt")
+	require.Contains(t, cmd, "benchfmt/go128off.txt")
 }
 
 func TestRunKeepsFailedAttempts(t *testing.T) {

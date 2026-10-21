@@ -29,7 +29,8 @@ type Config struct {
 type Session struct {
 	transports []*http.Transport
 	locals     []string
-	Retries    int
+	// Retries is the total number of dial retries across all slots.
+	Retries int
 }
 
 // Dial opens one connection per slot. The first response on each transport

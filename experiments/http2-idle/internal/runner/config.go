@@ -1,4 +1,6 @@
-// Package runner orchestrates HTTP/2 idle-connection trials on the host.
+// Package runner runs HTTP/2 idle-connection trials on the host.
+// It starts server and client processes, samples the server, and writes
+// JSON plus benchfmt output under the configured result directory.
 package runner
 
 import (
