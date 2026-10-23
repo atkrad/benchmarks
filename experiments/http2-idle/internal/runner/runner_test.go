@@ -310,12 +310,13 @@ func TestSmokeProfilePrecedesClose(t *testing.T) {
 		}
 		return &fakeChild{pid: 9, events: []json.RawMessage{readyEvent()}}, nil
 	})
+	rawProfile := []byte("goroutine profile: total 1\n1 @ 0x1\n#\t0x1\truntime.other+0x1\n")
 	deps.Get = func(context.Context, string) ([]byte, error) {
 		profiled = true
 		if closed {
 			profileAfterClose = true
 		}
-		return []byte("goroutine profile: total 1\n1 @ 0x1\n#\t0x1\truntime.other+0x1\n"), nil
+		return rawProfile, nil
 	}
 	deps.Stats = func(context.Context, string) (protocol.Stats, error) {
 		requests := int64(1)
@@ -348,6 +349,19 @@ func TestSmokeProfilePrecedesClose(t *testing.T) {
 	require.NoError(t, Run(t.Context(), cfg, deps))
 	require.True(t, profiled)
 	require.False(t, profileAfterClose)
+
+	entries, err := os.ReadDir(filepath.Join(cfg.OutputDir, "http2-idle"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	diag := filepath.Join(cfg.OutputDir, "http2-idle", entries[0].Name(), "diagnostics", "go127-n1.txt")
+	got, err := os.ReadFile(diag)
+	require.NoError(t, err)
+	require.Equal(t, rawProfile, got)
+	var sum ProfileSummary
+	summary, err := os.ReadFile(diag + ".summary.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(summary, &sum))
+	require.Equal(t, ProfileSummary{Goroutines: 1}, sum)
 }
 
 func TestSmokeProfileKeepsRawWhenParseFails(t *testing.T) {

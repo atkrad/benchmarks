@@ -401,7 +401,7 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		return fail(err)
 	}
 
-	// Profile while the held connections are still idle, before recheck or close.
+	// Profile while the held connections are still idle. Recheck wakes them.
 	if cfgSmokeProfile(e.cfg, cell) {
 		body, err := e.deps.Get(trialCtx, base+"/debug/pprof/goroutine?debug=1")
 		if err != nil {
@@ -409,10 +409,10 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		}
 		name := fmt.Sprintf("%s-n%d.txt", cell.Case, cell.Load)
 		path := filepath.Join(e.dir, "diagnostics", name)
+		// Keep the raw dump even when the summary cannot be parsed.
 		if err := os.WriteFile(path, body, 0o644); err != nil {
 			return fail(err)
 		}
-		// The raw dump is already on disk. A parse error must not invent a summary.
 		sum, err := SummarizeProfile(string(body))
 		if err != nil {
 			return fail(fmt.Errorf("goroutine profile: %w", err))

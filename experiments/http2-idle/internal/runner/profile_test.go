@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSummarizeProfileGrouped(t *testing.T) {
+func TestSummarizeProfile(t *testing.T) {
 	tests := []struct {
 		name    string
 		profile string
@@ -16,47 +16,7 @@ func TestSummarizeProfileGrouped(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "Go 1.27",
-			profile: `goroutine profile: total 407
-200 @ 0x111 0x222
-#	0x111	net/http/internal/http2.(*serverConn).readFrames+0x8b
-
-200 @ 0x333 0x444
-#	0x333	net/http/internal/http2.(*serverConn).serve+0x916
-
-7 @ 0x555
-#	0x555	runtime.otherFunction+0x10
-`,
-			want: ProfileSummary{Goroutines: 407, HTTP2Serve: 200, ReadFrames: 200},
-		},
-		{
-			name: "Go 1.28 parking enabled",
-			profile: `goroutine profile: total 207
-200 @ 0x111
-#	0x111	net/http/internal/http2.(*serverConn).readFrames+0x8b
-
-7 @ 0x222
-#	0x222	runtime.otherFunction+0x10
-`,
-			want: ProfileSummary{Goroutines: 207, HTTP2Serve: 0, ReadFrames: 200},
-		},
-		{
-			name: "Go 1.28 parking disabled",
-			profile: `goroutine profile: total 407
-200 @ 0x111
-#	0x111	net/http/internal/http2.(*serverConn).readFrames+0x8b
-
-200 @ 0x222
-#	0x222	net/http/internal/http2.(*serverConn).serveLoop+0x14d
-#	0x333	net/http/internal/http2.(*serverConn).serve+0x664
-
-7 @ 0x444
-#	0x444	runtime.otherFunction+0x10
-`,
-			want: ProfileSummary{Goroutines: 407, HTTP2Serve: 200, ReadFrames: 200},
-		},
-		{
-			name: "x/net symbols and two read groups",
+			name: "two read groups and one serve group",
 			profile: `goroutine profile: total 9
 2 @ 0x1
 #	0x1	golang.org/x/net/http2.(*serverConn).readFrames+0x1
@@ -71,7 +31,7 @@ func TestSummarizeProfileGrouped(t *testing.T) {
 			want: ProfileSummary{Goroutines: 9, HTTP2Serve: 4, ReadFrames: 5},
 		},
 		{
-			name: "unrelated serve function",
+			name: "similar names are not HTTP/2 serve or read",
 			profile: `goroutine profile: total 3
 3 @ 0x1
 #	0x1	net/http.(*conn).serve+0x10
@@ -80,9 +40,14 @@ func TestSummarizeProfileGrouped(t *testing.T) {
 			want: ProfileSummary{Goroutines: 3},
 		},
 		{
-			name:    "group immediately after header",
-			profile: "goroutine profile: total 2\n2 @ 0x1\n#\t0x1\truntime.other+0x1\n",
-			want:    ProfileSummary{Goroutines: 2},
+			name:    "group with no symbolized frames",
+			profile: "goroutine profile: total 1\n1 @ 0x4920a1\n",
+			want:    ProfileSummary{Goroutines: 1},
+		},
+		{
+			name:    "CRLF line endings",
+			profile: "goroutine profile: total 1\r\n1 @ 0x1\r\n#\t0x1\truntime.other+0x1\r\n",
+			want:    ProfileSummary{Goroutines: 1},
 		},
 		{
 			name:    "empty profile",
@@ -95,9 +60,19 @@ func TestSummarizeProfileGrouped(t *testing.T) {
 			wantErr: "unsupported format",
 		},
 		{
-			name:    "malformed group header",
+			name:    "zero count",
 			profile: "goroutine profile: total 1\n0 @ 0x1\n",
-			wantErr: "malformed line",
+			wantErr: "malformed group header",
+		},
+		{
+			name:    "header without addresses",
+			profile: "goroutine profile: total 1\n1 @garbage\n",
+			wantErr: "malformed group header",
+		},
+		{
+			name:    "group count overflows int",
+			profile: "goroutine profile: total 1\n9223372036854775808 @ 0x1\n",
+			wantErr: "overflows int",
 		},
 		{
 			name:    "total does not match groups",
@@ -124,7 +99,9 @@ func TestSummarizeProfileGrouped(t *testing.T) {
 	}
 }
 
-func TestSummarizeProfileSmokeFixtures(t *testing.T) {
+// TestSummarizeProfileFixtures uses the debug=1 dumps from the 2026-10-21
+// smoke run at 200 connections. They are the captured text, not a rewrite.
+func TestSummarizeProfileFixtures(t *testing.T) {
 	tests := []struct {
 		file string
 		want ProfileSummary

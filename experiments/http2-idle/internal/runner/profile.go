@@ -7,21 +7,16 @@ import (
 	"strings"
 )
 
-// ProfileSummary counts goroutines in a debug=1 profile.
-// That format groups identical stacks and prints the group size first.
-// Goroutines is the sum of those sizes. HTTP2Serve and ReadFrames are the
-// same kind of count for groups whose stack contains a matching HTTP/2
-// function. A group is counted once per category, even when several frames
-// match. The JSON names predate that weighting: the values are goroutine
-// counts, not a count of text lines. Symbol names are a diagnostic clue and
-// can change between Go versions. They are not the benchmark measurement.
+// ProfileSummary reports goroutine counts from a grouped pprof profile.
+// HTTP2Serve and ReadFrames count goroutines whose stacks contain matching
+// HTTP/2 functions.
 type ProfileSummary struct {
 	Goroutines int `json:"goroutines"`
 	HTTP2Serve int `json:"http2_serve_frames"`
 	ReadFrames int `json:"read_frames"`
 }
 
-// profileGroup is one debug=1 stack, shared by count goroutines.
+// profileGroup is one shared stack. count is how many goroutines use it.
 type profileGroup struct {
 	count    int
 	hasServe bool
@@ -30,14 +25,16 @@ type profileGroup struct {
 
 var (
 	profileTotalHeader = regexp.MustCompile(`^goroutine profile: total ([0-9]+)\s*$`)
-	profileGroupHeader = regexp.MustCompile(`^([1-9][0-9]*) @`)
+	profileGroupStart  = regexp.MustCompile(`^[0-9]+ @`)
+	profileGroupHeader = regexp.MustCompile(`^([1-9][0-9]*) @ 0x[0-9a-fA-F]+(?: 0x[0-9a-fA-F]+)*\s*$`)
 	profileFrameSymbol = regexp.MustCompile(`^#\s+\S+\s+(\S+)`)
 )
 
-// SummarizeProfile parses text from /debug/pprof/goroutine?debug=1.
-// It returns an error for an empty profile, a debug=2 trace, a malformed
-// line, or a group total that disagrees with the header. A valid profile
-// with no HTTP/2 serve frames returns HTTP2Serve 0 and a nil error.
+// SummarizeProfile parses a debug=1 goroutine profile.
+// debug=1 prints each distinct stack once, with a count of the goroutines
+// that share it. An empty profile, any other format, a malformed group
+// header, or a count that does not add up to the profile total is an error.
+// A profile with no matching serve frames is valid and reports HTTP2Serve 0.
 func SummarizeProfile(text string) (ProfileSummary, error) {
 	if strings.TrimSpace(text) == "" {
 		return ProfileSummary{}, fmt.Errorf("summarize profile: empty profile")
@@ -46,7 +43,6 @@ func SummarizeProfile(text string) (ProfileSummary, error) {
 	var sum ProfileSummary
 	var current *profileGroup
 	declared := -1
-	summed := 0
 
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -61,13 +57,12 @@ func SummarizeProfile(text string) (ProfileSummary, error) {
 			declared = total
 			continue
 		}
-		if count, ok := profileGroupCount(line); ok {
-			if err := sum.addGroup(current); err != nil {
-				return ProfileSummary{}, err
-			}
-			if current != nil {
-				summed += current.count
-			}
+		count, isGroup, err := profileGroupCount(line)
+		if err != nil {
+			return ProfileSummary{}, err
+		}
+		if isGroup {
+			sum.addGroup(current)
 			current = &profileGroup{count: count}
 			continue
 		}
@@ -85,27 +80,16 @@ func SummarizeProfile(text string) (ProfileSummary, error) {
 			current.hasRead = true
 		}
 	}
-	if declared < 0 {
-		return ProfileSummary{}, fmt.Errorf("summarize profile: unsupported format (want a debug=1 grouped profile)")
-	}
-	if err := sum.addGroup(current); err != nil {
-		return ProfileSummary{}, err
-	}
-	if current != nil {
-		summed += current.count
-	}
-	if summed != declared {
-		return ProfileSummary{}, fmt.Errorf("summarize profile: groups sum to %d, profile total is %d", summed, declared)
+	sum.addGroup(current)
+	if sum.Goroutines != declared {
+		return ProfileSummary{}, fmt.Errorf("summarize profile: groups sum to %d, profile total is %d", sum.Goroutines, declared)
 	}
 	return sum, nil
 }
 
-func (s *ProfileSummary) addGroup(g *profileGroup) error {
+func (s *ProfileSummary) addGroup(g *profileGroup) {
 	if g == nil {
-		return nil
-	}
-	if g.count < 1 {
-		return fmt.Errorf("summarize profile: group count must be positive")
+		return
 	}
 	s.Goroutines += g.count
 	if g.hasServe {
@@ -114,7 +98,6 @@ func (s *ProfileSummary) addGroup(g *profileGroup) error {
 	if g.hasRead {
 		s.ReadFrames += g.count
 	}
-	return nil
 }
 
 func profileTotal(line string) (int, bool) {
@@ -129,16 +112,19 @@ func profileTotal(line string) (int, bool) {
 	return n, true
 }
 
-func profileGroupCount(line string) (int, bool) {
+func profileGroupCount(line string) (int, bool, error) {
+	if !profileGroupStart.MatchString(line) {
+		return 0, false, nil
+	}
 	match := profileGroupHeader.FindStringSubmatch(line)
 	if match == nil {
-		return 0, false
+		return 0, false, fmt.Errorf("summarize profile: malformed group header %q", clip(line, 80))
 	}
 	n, err := strconv.Atoi(match[1])
-	if err != nil || n < 1 {
-		return 0, false
+	if err != nil {
+		return 0, false, fmt.Errorf("summarize profile: group count overflows int")
 	}
-	return n, true
+	return n, true, nil
 }
 
 func profileSymbol(line string) (string, bool) {
