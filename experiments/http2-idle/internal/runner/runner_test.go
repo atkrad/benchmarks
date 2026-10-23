@@ -357,11 +357,13 @@ func TestSmokeProfilePrecedesClose(t *testing.T) {
 	got, err := os.ReadFile(diag)
 	require.NoError(t, err)
 	require.Equal(t, rawProfile, got)
-	var sum ProfileSummary
 	summary, err := os.ReadFile(diag + ".summary.json")
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(summary, &sum))
-	require.Equal(t, ProfileSummary{Goroutines: 1}, sum)
+	require.JSONEq(t, `{
+		"goroutines": 1,
+		"http2_serve_frames": 0,
+		"read_frames": 0
+	}`, string(summary))
 }
 
 func TestSmokeProfileKeepsRawWhenParseFails(t *testing.T) {
