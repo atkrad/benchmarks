@@ -1,0 +1,87 @@
+goroutine profile: total 407
+200 @ 0x489086 0x449677 0x4882e6 0x4d10a7 0x4d1aa8 0x4d1a96 0x59dd85 0x5a6fc5 0x60496c 0x60180b 0x607f6f 0x607f70 0x4cac3d 0x6838dd 0x6838b0 0x6843e5 0x684b65 0x68d10c 0x48ffe1
+#	0x4882e5	internal/poll.runtime_pollWait+0x85			runtime/netpoll.go:351
+#	0x4d10a6	internal/poll.(*pollDesc).wait+0x26			internal/poll/fd_poll_runtime.go:84
+#	0x4d1aa7	internal/poll.(*pollDesc).waitRead+0x287		internal/poll/fd_poll_runtime.go:89
+#	0x4d1a95	internal/poll.(*FD).Read+0x275				internal/poll/fd_unix.go:170
+#	0x59dd84	net.(*netFD).Read+0x24					net/fd_posix.go:68
+#	0x5a6fc4	net.(*conn).Read+0x44					net/net.go:196
+#	0x60496b	crypto/tls.(*Conn).readFromUntil+0x2ab			crypto/tls/conn.go:922
+#	0x60180a	crypto/tls.(*Conn).readRecordOrCCS+0x46a		crypto/tls/conn.go:656
+#	0x607f6e	crypto/tls.(*Conn).readRecord+0x12e			crypto/tls/conn.go:605
+#	0x607f6f	crypto/tls.(*Conn).Read+0x12f				crypto/tls/conn.go:1494
+#	0x4cac3c	io.ReadAtLeast+0x7c					io/io.go:335
+#	0x6838dc	io.ReadFull+0x5c					io/io.go:354
+#	0x6838af	net/http/internal/http2.readFrameHeader+0x2f		net/http/internal/http2/frame.go:253
+#	0x6843e4	net/http/internal/http2.(*Framer).ReadFrameHeader+0x64	net/http/internal/http2/frame.go:646
+#	0x684b64	net/http/internal/http2.(*Framer).ReadFrame+0x24	net/http/internal/http2/frame.go:707
+#	0x68d10b	net/http/internal/http2.(*serverConn).readFrames+0x8b	net/http/internal/http2/server.go:741
+
+200 @ 0x489086 0x462734 0x68e00e 0x68dc65 0x68c625 0x68b80f 0x6a3b6e 0x6b5db4 0x6b54a5 0x48ffe1
+#	0x68e00d	net/http/internal/http2.(*serverConn).serveLoop+0x14d	net/http/internal/http2/server.go:948
+#	0x68dc64	net/http/internal/http2.(*serverConn).serve+0x664	net/http/internal/http2/server.go:874
+#	0x68c624	net/http/internal/http2.(*Server).serveConn+0xdc4	net/http/internal/http2/server.go:422
+#	0x68b80e	net/http/internal/http2.(*Server).ServeConn+0xce	net/http/internal/http2/server.go:246
+#	0x6a3b6d	net/http.(*Server).serveHTTP2Conn+0x3ed			net/http/http2.go:108
+#	0x6b5db3	net/http.(*conn).serveHTTP2+0xd3			net/http/server.go:2387
+#	0x6b54a4	net/http.(*conn).serve+0x17c4				net/http/server.go:2085
+
+1 @ 0x41db89 0x48b1f8 0x4f2113 0x48ffe1
+#	0x48b1f7	os/signal.signal_recv+0x97	runtime/sigqueue.go:152
+#	0x4f2112	os/signal.loop+0x12		os/signal/signal_unix.go:23
+
+1 @ 0x4462b1 0x487ebd 0x6d8e11 0x6d8adf 0x6d5aa9 0x6eef9e 0x6f6cf1 0x6b6009 0x6b7ac9 0x6be4fc 0x6b439c 0x48ffe1
+#	0x6d8e10	runtime/pprof.writeRuntimeProfile+0xb0								runtime/pprof/pprof.go:848
+#	0x6d8ade	runtime/pprof.writeGoroutine+0x3e								runtime/pprof/pprof.go:781
+#	0x6d5aa8	runtime/pprof.(*Profile).WriteTo+0x128								runtime/pprof/pprof.go:405
+#	0x6eef9d	net/http/pprof.handler.ServeHTTP+0x53d								net/http/pprof/pprof.go:272
+#	0x6f6cf0	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.newControl.func4+0x70	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:211
+#	0x6b6008	net/http.HandlerFunc.ServeHTTP+0x28								net/http/server.go:2471
+#	0x6b7ac8	net/http.(*ServeMux).ServeHTTP+0x1c8								net/http/server.go:3036
+#	0x6be4fb	net/http.serverHandler.ServeHTTP+0xbb								net/http/server.go:3556
+#	0x6b439b	net/http.(*conn).serve+0x6bb									net/http/server.go:2218
+
+1 @ 0x489086 0x449677 0x4882e6 0x4d10a7 0x4d2495 0x4d2483 0x59eac9 0x5ae13b 0x5ad610 0x6b92a2 0x6f563d 0x6f6692 0x48ffe1
+#	0x4882e5	internal/poll.runtime_pollWait+0x85								runtime/netpoll.go:351
+#	0x4d10a6	internal/poll.(*pollDesc).wait+0x26								internal/poll/fd_poll_runtime.go:84
+#	0x4d2494	internal/poll.(*pollDesc).waitRead+0x274							internal/poll/fd_poll_runtime.go:89
+#	0x4d2482	internal/poll.(*FD).Accept+0x262								internal/poll/fd_unix.go:618
+#	0x59eac8	net.(*netFD).accept+0x28									net/fd_unix.go:149
+#	0x5ae13a	net.(*TCPListener).accept+0x1a									net/tcpsock_posix.go:159
+#	0x5ad60f	net.(*TCPListener).Accept+0x2f									net/tcpsock.go:387
+#	0x6b92a1	net/http.(*Server).Serve+0x341									net/http/server.go:3700
+#	0x6f563c	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.serveIgnoreClosed+0x1c	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:118
+#	0x6f6691	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.(*Server).Serve.func2+0x31	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:86
+
+1 @ 0x489086 0x449677 0x4882e6 0x4d10a7 0x4d2495 0x4d2483 0x59eac9 0x5ae13b 0x5ad610 0x6f64a4 0x63b864 0x6b92a2 0x6f563d 0x6f66f1 0x48ffe1
+#	0x4882e5	internal/poll.runtime_pollWait+0x85									runtime/netpoll.go:351
+#	0x4d10a6	internal/poll.(*pollDesc).wait+0x26									internal/poll/fd_poll_runtime.go:84
+#	0x4d2494	internal/poll.(*pollDesc).waitRead+0x274								internal/poll/fd_poll_runtime.go:89
+#	0x4d2482	internal/poll.(*FD).Accept+0x262									internal/poll/fd_unix.go:618
+#	0x59eac8	net.(*netFD).accept+0x28										net/fd_unix.go:149
+#	0x5ae13a	net.(*TCPListener).accept+0x1a										net/tcpsock_posix.go:159
+#	0x5ad60f	net.(*TCPListener).Accept+0x2f										net/tcpsock.go:387
+#	0x6f64a3	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.(*trackedListener).Accept+0x23	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:303
+#	0x63b863	crypto/tls.(*listener).Accept+0x23									crypto/tls/tls.go:78
+#	0x6b92a1	net/http.(*Server).Serve+0x341										net/http/server.go:3700
+#	0x6f563c	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.serveIgnoreClosed+0x1c		github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:118
+#	0x6f66f0	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.(*Server).Serve.func1+0x30		github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:85
+
+1 @ 0x489086 0x462734 0x4f245c 0x48ffe1
+#	0x4f245b	os/signal.NotifyContext.func1+0x7b	os/signal/signal.go:304
+
+1 @ 0x489086 0x462734 0x6f514c 0x6f7a35 0x6f7617 0x4505a8 0x48ffe1
+#	0x6f514b	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server.(*Server).Serve+0x1ab	github.com/atkrad/benchmarks/experiments/http2-idle/internal/server/server.go:90
+#	0x6f7a34	main.run+0x334											github.com/atkrad/benchmarks/experiments/http2-idle/cmd/server/main.go:46
+#	0x6f7616	main.main+0x16											github.com/atkrad/benchmarks/experiments/http2-idle/cmd/server/main.go:17
+#	0x4505a7	runtime.main+0x427										runtime/proc.go:302
+
+1 @ 0x49db65 0x49c398 0x4d1a12 0x4d19f3 0x4d1961 0x59dd85 0x5a6fc5 0x6ae2d2 0x48ffe1
+#	0x49db64	syscall.Syscall+0x24				syscall/syscall_linux.go:74
+#	0x49c397	syscall.read+0x37				syscall/zsyscall_linux_amd64.go:736
+#	0x4d1a11	syscall.Read+0x1f1				syscall/syscall_unix.go:183
+#	0x4d19f2	internal/poll.ignoringEINTRIO+0x1d2		internal/poll/fd_unix.go:743
+#	0x4d1960	internal/poll.(*FD).Read+0x140			internal/poll/fd_unix.go:166
+#	0x59dd84	net.(*netFD).Read+0x24				net/fd_posix.go:68
+#	0x5a6fc4	net.(*conn).Read+0x44				net/net.go:196
+#	0x6ae2d1	net/http.(*connReader).backgroundRead+0x31	net/http/server.go:753

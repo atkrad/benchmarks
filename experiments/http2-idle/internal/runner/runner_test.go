@@ -310,12 +310,13 @@ func TestSmokeProfilePrecedesClose(t *testing.T) {
 		}
 		return &fakeChild{pid: 9, events: []json.RawMessage{readyEvent()}}, nil
 	})
+	rawProfile := []byte("goroutine profile: total 1\n1 @ 0x1\n#\t0x1\truntime.other+0x1\n")
 	deps.Get = func(context.Context, string) ([]byte, error) {
 		profiled = true
 		if closed {
 			profileAfterClose = true
 		}
-		return []byte("goroutine 1 [running]:\n"), nil
+		return rawProfile, nil
 	}
 	deps.Stats = func(context.Context, string) (protocol.Stats, error) {
 		requests := int64(1)
@@ -348,6 +349,51 @@ func TestSmokeProfilePrecedesClose(t *testing.T) {
 	require.NoError(t, Run(t.Context(), cfg, deps))
 	require.True(t, profiled)
 	require.False(t, profileAfterClose)
+
+	entries, err := os.ReadDir(filepath.Join(cfg.OutputDir, "http2-idle"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	diag := filepath.Join(cfg.OutputDir, "http2-idle", entries[0].Name(), "diagnostics", "go127-n1.txt")
+	got, err := os.ReadFile(diag)
+	require.NoError(t, err)
+	require.Equal(t, rawProfile, got)
+	summary, err := os.ReadFile(diag + ".summary.json")
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"goroutines": 1,
+		"http2_serve_frames": 0,
+		"read_frames": 0
+	}`, string(summary))
+}
+
+func TestSmokeProfileKeepsRawWhenParseFails(t *testing.T) {
+	clock := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "diagnostics"), 0o755))
+	cfg := testConfig(t)
+	cfg.Smoke = true
+	cfg.ConnectionCounts = []int{0}
+	rawProfile := []byte("goroutine 1 [running]:\nmain.main()\n")
+	deps := testDeps(&clock, func(context.Context, process.Spec) (Child, error) {
+		return &fakeChild{pid: 9, events: []json.RawMessage{readyEvent()}}, nil
+	})
+	deps.Get = func(context.Context, string) ([]byte, error) {
+		return rawProfile, nil
+	}
+	eng := &engine{
+		cfg:    cfg,
+		deps:   deps,
+		dir:    dir,
+		hashes: map[string]string{},
+		byCase: map[string]*caseFile{},
+	}
+	_, err := eng.trial(t.Context(), experiment.Cell{Case: "go127", Load: 0}, runCase{Name: "go127"}, "probe", 0)
+	require.ErrorContains(t, err, "goroutine profile")
+	got, err := os.ReadFile(filepath.Join(dir, "diagnostics", "go127-n0.txt"))
+	require.NoError(t, err)
+	require.Equal(t, rawProfile, got)
+	_, err = os.Stat(filepath.Join(dir, "diagnostics", "go127-n0.txt.summary.json"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 type stderrChild struct {
