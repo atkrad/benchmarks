@@ -74,9 +74,12 @@ the baseline. The runner checks `ulimit -n` and stops with a message if there
 are not enough file descriptors. It does not raise the limit.
 
 `--smoke` is a short manual run: counts 0 and 200, 3 rounds, and a goroutine
-dump under `diagnostics/`. Smoke output is not a result to publish. The
-dump's stack text changes between compilers. It is a clue, not the pass/fail
-check.
+dump under `diagnostics/`. The dump is `debug=1`. That format prints each
+shared stack once, with the number of goroutines that share it. The summary
+adds those numbers. A stack that lists both `serveLoop` and `serve` is still
+one group. The function names are a clue for that dump. They can change
+between Go versions, and they are not the RSS or goroutine series the
+benchmark records. Smoke output is not a result to publish.
 
 `--gc-policy forced` calls `POST /gc` before the stability window, on every
 case. Do not compare a forced run with a natural run. The default policy is

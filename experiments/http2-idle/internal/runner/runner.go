@@ -412,7 +412,11 @@ func (e *engine) trial(ctx context.Context, cell experiment.Cell, cas runCase, p
 		if err := os.WriteFile(path, body, 0o644); err != nil {
 			return fail(err)
 		}
-		sum := SummarizeProfile(string(body))
+		// The raw dump is already on disk. A parse error must not invent a summary.
+		sum, err := SummarizeProfile(string(body))
+		if err != nil {
+			return fail(fmt.Errorf("goroutine profile: %w", err))
+		}
 		if err := report.WriteJSONFile(filepath.Join(e.dir, "diagnostics", name+".summary.json"), sum); err != nil {
 			return fail(err)
 		}
